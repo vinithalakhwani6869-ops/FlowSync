@@ -2,7 +2,7 @@
 
 Your editor knows your code. Your browser knows your research. FlowSync knows what's actually happening.
 
-FlowSync is a **developer workflow intelligence engine** — it captures what happens in the gaps between your tools, which no single tool can see because it lives across all of them.
+FlowSync is a **developer workflow engine** that captures what happens in the gaps between your tools, which no single tool can see because it lives across all of them.
 
 Your editor knows your code.
 Your browser knows your research.

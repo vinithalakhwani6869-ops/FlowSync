@@ -1,5 +1,27 @@
+# ---- Dependencies ----
 node_modules/
+
+# ---- Environment & secrets (never commit) ----
 .env
-.env.local
+.env.*
+!.env.example
+
+# ---- Frontend build output (Vite) ----
 dist/
-build/
+
+# ---- Python / FastAPI ----
+__pycache__/
+*.py[cod]
+.venv/
+*.log
+backend/data/
+
+# ---- IDE / OS cruft ----
+.vscode/
+Thumbs.db
+
+# ---- Logs & temp ----
+npm-debug.log*
+pnpm-debug.log*
+*.tmp
+*.bak

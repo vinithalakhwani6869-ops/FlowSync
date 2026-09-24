@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "FlowSync Capture",
+  "version": "0.1.0",
+  "description": "Watches what happens in the gaps between your tools. Captures browsing activity for FlowSync debugging timelines, silently and locally-first.",
+  "permissions": [
+    "tabs",
+    "storage"
+  ],
+  "host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://api.flowsync.app/*"
+  ],
+  "background": {
+    "service_worker": "dist/background.js"
+  },
+  "minimum_chrome_version": "116"
+}

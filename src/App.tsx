@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   LayoutDashboard, FolderOpen, Clock, Shield, Settings,
   ChevronRight, ExternalLink, Copy, Check, ArrowDown,
@@ -8,6 +8,11 @@ import {
   ToggleLeft, ToggleRight, Bell, Eye, EyeOff, Info,
   ArrowRight, Play, Pause, Search
 } from "lucide-react";
+import {
+  connectEvents, fetchEvents, fetchStats, formatDuration,
+  formatHours, formatRelative, formatTime,
+} from "./lib/flowsync";
+import type { FlowSyncEvent, FlowSyncStats } from "./lib/flowsync";
 
 type Screen = "landing" | "dashboard" | "capture" | "vscode" | "timeline" | "privacy" | "settings" | "architecture";
 
@@ -73,9 +78,9 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
     <div className="min-h-screen bg-background font-['Inter',sans-serif]">
       {/* Nav */}
       <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-border">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-8">
-            <div className="flex items-center gap-2">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 sm:gap-8">
+            <div className="flex items-center gap-2 flex-shrink-0">
               <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center">
                 <Zap size={14} className="text-white" />
               </div>
@@ -90,12 +95,12 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
             </nav>
           </div>
           <div className="flex items-center gap-3">
-            <button className="text-sm text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5">
+            <button className="hidden sm:block text-sm text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5">
               Sign In
             </button>
             <button
               onClick={() => navigate("dashboard")}
-              className="text-sm font-medium bg-primary text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+              className="text-sm font-medium bg-primary text-white px-3 sm:px-4 py-2 min-h-11 sm:min-h-0 rounded-lg hover:bg-blue-700 transition-colors flex-shrink-0"
             >
               Open Dashboard
             </button>
@@ -104,14 +109,14 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
       </header>
 
       {/* Hero */}
-      <section className="max-w-7xl mx-auto px-6 pt-20 pb-16">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 pt-14 sm:pt-20 pb-12 sm:pb-16">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 sm:gap-16 items-center">
           <div>
             <div className="inline-flex items-center gap-2 bg-blue-50 border border-blue-100 text-blue-700 text-xs font-medium px-3 py-1.5 rounded-full mb-6">
               <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
               Developer memory layer — not another AI assistant
             </div>
-            <h1 className="text-[52px] font-bold text-foreground leading-[1.1] tracking-tight mb-6">
+            <h1 className="text-[32px] md:text-[52px] font-bold text-foreground leading-[1.1] tracking-tight mb-6">
               FlowSync reconstructs the exact path that led to your fix —{" "}
               <span className="text-primary">automatically.</span>
             </h1>
@@ -121,14 +126,14 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
             <div className="flex flex-wrap gap-3">
               <button
                 onClick={() => navigate("dashboard")}
-                className="flex items-center gap-2 bg-primary text-white px-6 py-3 rounded-xl font-medium hover:bg-blue-700 transition-all hover:shadow-lg hover:shadow-blue-200"
+                className="flex items-center justify-center w-full sm:w-auto gap-2 bg-primary text-white px-6 py-3 rounded-xl font-medium hover:bg-blue-700 transition-all hover:shadow-lg hover:shadow-blue-200"
               >
                 Open Dashboard
                 <ArrowRight size={16} />
               </button>
               <button
                 onClick={handleCopy}
-                className="flex items-center gap-2 bg-white border border-border text-foreground px-6 py-3 rounded-xl font-medium hover:bg-gray-50 transition-colors"
+                className="flex items-center justify-center w-full sm:w-auto gap-2 bg-white border border-border text-foreground px-6 py-3 rounded-xl font-medium hover:bg-gray-50 transition-colors"
               >
                 {copied ? <Check size={16} className="text-emerald-600" /> : <Globe size={16} />}
                 Install Chrome Extension
@@ -158,7 +163,7 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
               return (
                 <div
                   key={i}
-                  className={`w-80 border rounded-2xl px-5 py-4 flex items-center gap-4 ${item.highlight ? "bg-primary border-primary shadow-lg shadow-blue-200" : "bg-white border-border shadow-sm"}`}
+                  className={`w-full max-w-xs md:w-80 border rounded-2xl px-5 py-4 flex items-center gap-4 ${item.highlight ? "bg-primary border-primary shadow-lg shadow-blue-200" : "bg-white border-border shadow-sm"}`}
                 >
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${item.highlight ? "bg-white/20" : "bg-blue-50"}`}>
                     <Icon size={18} className={item.highlight ? "text-white" : "text-primary"} />
@@ -185,9 +190,9 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
       </section>
 
       {/* Stats */}
-      <section className="bg-white border-y border-border py-16">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
+      <section className="bg-white border-y border-border py-10 sm:py-16">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 sm:gap-8">
             {stats.map((stat) => (
               <div key={stat.label} className="text-center">
                 <div className="text-4xl font-bold text-foreground mb-2">{stat.value}</div>
@@ -199,8 +204,8 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
       </section>
 
       {/* How it works */}
-      <section className="max-w-7xl mx-auto px-6 py-20">
-        <div className="text-center mb-14">
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 py-12 sm:py-20">
+        <div className="text-center mb-10 sm:mb-14">
           <h2 className="text-3xl font-bold text-foreground mb-3">How FlowSync Works</h2>
           <p className="text-muted-foreground max-w-xl mx-auto">Three layers that connect your entire debugging journey, automatically.</p>
         </div>
@@ -226,8 +231,8 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
       </section>
 
       {/* Integrations */}
-      <section className="bg-white border-y border-border py-14">
-        <div className="max-w-7xl mx-auto px-6 text-center">
+      <section className="bg-white border-y border-border py-10 sm:py-14">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 text-center">
           <p className="text-sm font-medium text-muted-foreground mb-8 uppercase tracking-widest">Works with your entire stack</p>
           <div className="flex flex-wrap justify-center gap-8">
             {integrations.map((int) => (
@@ -241,14 +246,14 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
       </section>
 
       {/* CTA */}
-      <section className="max-w-4xl mx-auto px-6 py-24 text-center">
-        <h2 className="text-4xl font-bold text-foreground mb-4">Stop rediscovering fixes you already know.</h2>
+      <section className="max-w-4xl mx-auto px-4 sm:px-6 py-16 sm:py-24 text-center">
+        <h2 className="text-3xl sm:text-4xl font-bold text-foreground mb-4">Stop rediscovering fixes you already know.</h2>
         <p className="text-lg text-muted-foreground mb-8">FlowSync remembers the path, so you can focus on the destination.</p>
         <button
           onClick={() => navigate("dashboard")}
-          className="bg-primary text-white px-8 py-4 rounded-xl font-semibold text-lg hover:bg-blue-700 transition-all hover:shadow-xl hover:shadow-blue-200 inline-flex items-center gap-2"
+          className="w-full sm:w-auto justify-center bg-primary text-white px-8 py-4 rounded-xl font-semibold text-lg hover:bg-blue-700 transition-all hover:shadow-xl hover:shadow-blue-200 inline-flex items-center gap-2"
         >
-          Open Dashboard — it's free
+          Open Dashboard 
           <ArrowRight size={18} />
         </button>
         <p className="text-xs text-muted-foreground mt-4">No account required. Local-first by default.</p>
@@ -261,10 +266,10 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
 
 function DashboardLayout({ children, navigate, active }: { children: React.ReactNode; navigate: (s: Screen) => void; active: Screen }) {
   return (
-    <div className="flex h-screen bg-background font-['Inter',sans-serif] overflow-hidden">
+    <div className="flex h-screen flex-col md:flex-row bg-background font-['Inter',sans-serif] overflow-hidden">
       {/* Sidebar */}
-      <aside className="w-60 bg-white border-r border-border flex flex-col flex-shrink-0">
-        <div className="h-16 flex items-center px-5 border-b border-border">
+      <aside className="w-full md:w-60 bg-white border-b md:border-b-0 md:border-r border-border flex md:flex-col items-center md:items-stretch flex-shrink-0">
+        <div className="hidden md:flex h-16 items-center px-5 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center">
               <Zap size={14} className="text-white" />
@@ -272,7 +277,7 @@ function DashboardLayout({ children, navigate, active }: { children: React.React
             <span className="font-semibold text-foreground text-[15px]">FlowSync</span>
           </div>
         </div>
-        <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
+        <nav className="flex md:flex-col flex-1 md:p-3 md:space-y-0.5 items-center md:items-stretch gap-1 md:gap-0 px-2 py-1.5 overflow-x-auto md:overflow-y-auto">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const isActive = active === item.id;
@@ -280,7 +285,7 @@ function DashboardLayout({ children, navigate, active }: { children: React.React
               <button
                 key={item.id}
                 onClick={() => navigate(item.id)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+                className={`w-auto md:w-full flex items-center gap-3 px-3 py-3 md:py-2.5 rounded-xl text-sm font-medium whitespace-nowrap flex-shrink-0 transition-colors ${
                   isActive ? "bg-blue-50 text-primary" : "text-muted-foreground hover:bg-gray-50 hover:text-foreground"
                 }`}
               >
@@ -290,16 +295,16 @@ function DashboardLayout({ children, navigate, active }: { children: React.React
             );
           })}
         </nav>
-        <div className="p-3 border-t border-border">
+        <div className="md:p-3 md:border-t md:border-border">
           <button
             onClick={() => navigate("landing")}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-muted-foreground hover:bg-gray-50 hover:text-foreground transition-colors"
+            className="w-auto md:w-full flex items-center gap-3 px-3 py-3 md:py-2.5 rounded-xl text-sm text-muted-foreground hover:bg-gray-50 hover:text-foreground transition-colors whitespace-nowrap flex-shrink-0"
           >
             <Globe size={16} />
-            View Landing Page
+            <span className="hidden md:inline">View Landing Page</span>
           </button>
         </div>
-        <div className="p-4 border-t border-border">
+        <div className="hidden md:block p-4 border-t border-border">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-white text-xs font-semibold">VL</div>
             <div>
@@ -319,38 +324,68 @@ function DashboardLayout({ children, navigate, active }: { children: React.React
 }
 
 function DashboardScreen({ navigate }: { navigate: (s: Screen) => void }) {
+  const [stats, setStats] = useState<FlowSyncStats | null>(null);
+  const [recentEvents, setRecentEvents] = useState<FlowSyncEvent[]>([]);
+
+  useEffect(() => {
+    let disposed = false;
+    void fetchStats().then((value) => {
+      if (!disposed) setStats(value);
+    });
+    void fetchEvents(20).then((value) => {
+      if (!disposed) setRecentEvents(value);
+    });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  const topSource =
+    stats && Object.entries(stats.bySource).length > 0 ? Object.entries(stats.bySource)[0] : null;
+  const topProjects = stats ? Object.entries(stats.projects).slice(0, 2).map(([name]) => name) : [];
+
   const overviewCards = [
-    { label: "Recovered Contexts", value: "247", change: "+12 this week", icon: RefreshCw, color: "text-primary bg-blue-50" },
-    { label: "Hours Saved", value: "38.4", change: "+4.2 hrs this week", icon: Clock, color: "text-emerald-600 bg-emerald-50" },
-    { label: "Retrieval Accuracy", value: "94.7%", change: "↑ 1.3% from last week", icon: TrendingUp, color: "text-violet-600 bg-violet-50" },
-    { label: "Projects Active", value: "4", change: "AI Summarizer, FlowSync…", icon: FolderOpen, color: "text-amber-600 bg-amber-50" },
+    { label: "Contexts Recorded", value: stats ? String(stats.totalEvents) : "—", change: stats ? `+${stats.todayEvents} today` : "loading…", icon: RefreshCw, color: "text-primary bg-blue-50" },
+    { label: "Hours Saved", value: stats ? formatHours(stats.dwellMs) : "—", change: stats ? `${Math.round(stats.dwellMs / 60000)} min of tracked activity` : "loading…", icon: Clock, color: "text-emerald-600 bg-emerald-50" },
+    { label: "Pages Tracked", value: stats ? String(stats.distinctUrls) : "—", change: topSource ? `${topSource[0]} — ${topSource[1]} events` : "loading…", icon: TrendingUp, color: "text-violet-600 bg-violet-50" },
+    { label: "Projects Active", value: stats ? String(Object.keys(stats.projects).length) : "—", change: topProjects.length > 0 ? topProjects.join(", ") : "loading…", icon: FolderOpen, color: "text-amber-600 bg-amber-50" },
   ];
 
-  const recentSessions = [
-    { project: "AI Document Summarizer", error: "ModuleNotFoundError: requests", time: "2h ago", status: "recovered", match: 94 },
-    { project: "Deepfake Detector", error: "Git Merge Conflict — main/feature", time: "5h ago", status: "recovered", match: 88 },
-    { project: "Portfolio", error: "TypeError: Cannot read props", time: "Yesterday", status: "recovered", match: 76 },
-    { project: "FlowSync", error: "Dependency version mismatch", time: "2 days ago", status: "recovered", match: 91 },
-  ];
+  const recentSessions = recentEvents.slice(0, 4).map((event) => ({
+    key: event.id,
+    project: event.project,
+    error: event.payload.title || event.payload.url || event.type,
+    time: formatRelative(event.ts),
+    visits: event.payload.visitCount ?? 0,
+  }));
 
-  const recentRetrievals = [
-    { error: "ModuleNotFoundError", project: "AI Document Summarizer", time: "Today 09:34", match: 94 },
-    { error: "Git Merge Conflict", project: "Deepfake Detector", time: "Today 14:12", match: 88 },
-    { error: "Dependency Error", project: "Portfolio", time: "Yesterday", match: 76 },
-  ];
+  const recentRetrievals = recentEvents
+    .filter((event) => event.type === "tab.visit")
+    .slice(0, 5)
+    .map((event) => ({
+      key: event.id,
+      error: event.payload.title
+        ? event.payload.title.slice(0, 32)
+        : event.payload.url
+          ? new URL(event.payload.url).hostname
+          : "page visit",
+      project: event.project,
+      time: formatRelative(event.ts),
+      visits: event.payload.visitCount ?? 0,
+    }));
 
   return (
     <DashboardLayout navigate={navigate} active="dashboard">
-      <div className="p-8">
-        <div className="flex items-center justify-between mb-8">
+      <div className="p-4 sm:p-6 md:p-8">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-0 sm:justify-between mb-6 sm:mb-8">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Welcome back</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-foreground">Welcome back</h1>
             <p className="text-muted-foreground mt-1">Here's what FlowSync captured today.</p>
           </div>
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-medium px-3 py-1.5 rounded-full">
               <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              Capturing — VS Code active
+              Capturing — Chrome active
             </div>
           </div>
         </div>
@@ -376,7 +411,7 @@ function DashboardScreen({ navigate }: { navigate: (s: Screen) => void }) {
           {/* Recent sessions */}
           <div className="xl:col-span-2">
             <Card className="overflow-hidden">
-              <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+              <div className="px-4 sm:px-6 py-4 border-b border-border flex items-center justify-between">
                 <h2 className="font-semibold text-foreground">Recent Sessions</h2>
                 <button onClick={() => navigate("timeline")} className="text-sm text-primary hover:underline flex items-center gap-1">
                   View all <ChevronRight size={14} />
@@ -384,17 +419,17 @@ function DashboardScreen({ navigate }: { navigate: (s: Screen) => void }) {
               </div>
               <div className="divide-y divide-border">
                 {recentSessions.map((session) => (
-                  <div key={session.project} className="px-6 py-4 flex items-center justify-between hover:bg-gray-50 cursor-pointer transition-colors group" onClick={() => navigate("timeline")}>
-                    <div className="flex items-center gap-4">
+                  <div key={session.key} className="px-4 sm:px-6 py-4 flex items-center justify-between gap-3 hover:bg-gray-50 cursor-pointer transition-colors group" onClick={() => navigate("timeline")}>
+                    <div className="flex items-center gap-4 min-w-0">
                       <div className="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0" />
-                      <div>
-                        <div className="text-sm font-medium text-foreground group-hover:text-primary transition-colors">{session.project}</div>
-                        <div className="text-xs text-muted-foreground font-mono mt-0.5">{session.error}</div>
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-foreground group-hover:text-primary transition-colors break-words">{session.project}</div>
+                        <div className="text-xs text-muted-foreground font-mono mt-0.5 break-all">{session.error}</div>
                       </div>
                     </div>
                     <div className="flex items-center gap-3 flex-shrink-0">
                       <div className="text-right">
-                        <div className="text-xs font-semibold text-emerald-600">{session.match}% match</div>
+                        <div className="text-xs font-semibold text-emerald-600">{session.visits} visits</div>
                         <div className="text-xs text-muted-foreground mt-0.5">{session.time}</div>
                       </div>
                       <ChevronRight size={14} className="text-muted-foreground" />
@@ -413,10 +448,10 @@ function DashboardScreen({ navigate }: { navigate: (s: Screen) => void }) {
               </div>
               <div className="p-4 space-y-3">
                 {recentRetrievals.map((r) => (
-                  <div key={r.error} className="p-3 bg-background rounded-xl hover:bg-blue-50 cursor-pointer transition-colors group" onClick={() => navigate("timeline")}>
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="text-xs font-semibold text-foreground font-mono">{r.error}</div>
-                      <Badge color="blue">{r.match}%</Badge>
+                  <div key={r.key} className="p-3 bg-background rounded-xl hover:bg-blue-50 cursor-pointer transition-colors group" onClick={() => navigate("timeline")}>
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <div className="text-xs font-semibold text-foreground font-mono min-w-0 break-all">{r.error}</div>
+                      <Badge color="blue" >{r.visits} visits</Badge>
                     </div>
                     <div className="text-xs text-muted-foreground">{r.project}</div>
                     <div className="text-xs text-muted-foreground mt-1">{r.time}</div>
@@ -427,7 +462,7 @@ function DashboardScreen({ navigate }: { navigate: (s: Screen) => void }) {
               <div className="px-5 pb-5">
                 <button
                   onClick={() => navigate("capture")}
-                  className="w-full border border-border rounded-xl py-2.5 text-sm text-muted-foreground hover:bg-gray-50 hover:text-foreground transition-colors flex items-center justify-center gap-2"
+                  className="w-full border border-border rounded-xl py-3 md:py-2.5 text-sm text-muted-foreground hover:bg-gray-50 hover:text-foreground transition-colors flex items-center justify-center gap-2"
                 >
                   <Activity size={14} />
                   View Live Capture
@@ -443,44 +478,135 @@ function DashboardScreen({ navigate }: { navigate: (s: Screen) => void }) {
 
 // ─── LIVE CAPTURE ────────────────────────────────────────────────────────────
 
+interface CaptureRow {
+  id: string;
+  source: string;
+  detail: string;
+  time: string;
+  icon: React.ComponentType<{ size?: number | string; className?: string }>;
+  color: string;
+}
+
+function eventDetail(event: FlowSyncEvent): string {
+  const title = event.payload.title || event.payload.url || "";
+  if (event.type === "tab.dwell") {
+    const dwell = event.payload.dwellTime ?? 0;
+    return title ? `${title} — dwelled ${formatDuration(dwell)}` : `Dwelled ${formatDuration(dwell)}`;
+  }
+  if (event.type === "session.start") return "Chrome extension session started";
+  if (event.type === "tab.visit") {
+    const visits = event.payload.visitCount ?? 0;
+    return title ? `${title} (visit ${visits})` : `Visited page (visit ${visits})`;
+  }
+  return title || event.type;
+}
+
+function toCaptureRow(event: FlowSyncEvent): CaptureRow {
+  let icon: React.ComponentType<{ size?: number | string; className?: string }> = Globe;
+  let color = "text-blue-600 bg-blue-50";
+  if (event.type === "tab.dwell") {
+    icon = Clock;
+    color = "text-emerald-600 bg-emerald-50";
+  } else if (event.type === "session.start") {
+    icon = Activity;
+    color = "text-amber-600 bg-amber-50";
+  }
+  return {
+    id: event.id,
+    source: "Chrome",
+    detail: eventDetail(event),
+    time: formatTime(event.ts),
+    icon,
+    color,
+  };
+}
+
 function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
   const [isPaused, setIsPaused] = useState(false);
-  const [events, setEvents] = useState([
-    { id: 1, type: "chrome", source: "Chrome", detail: "stackoverflow.com — Python requests install", time: "09:23:14", icon: Globe, color: "text-blue-600 bg-blue-50" },
-    { id: 2, type: "chrome", source: "Stack Overflow", detail: "How to install requests library in Python virtualenv", time: "09:23:45", icon: Globe, color: "text-orange-600 bg-orange-50" },
-    { id: 3, type: "github", source: "GitHub Issue", detail: "pip install fails inside venv #4821", time: "09:25:02", icon: GitBranch, color: "text-gray-700 bg-gray-100" },
-    { id: 4, type: "docs", source: "Python Docs", detail: "venv — Creation of virtual environments", time: "09:26:40", icon: FileText, color: "text-yellow-600 bg-yellow-50" },
-    { id: 5, type: "vscode", source: "VS Code", detail: "main.py — ModuleNotFoundError triggered", time: "09:27:10", icon: Code, color: "text-primary bg-blue-50" },
-    { id: 6, type: "terminal", source: "Terminal", detail: "$ pip install requests", time: "09:28:35", icon: Terminal, color: "text-emerald-600 bg-emerald-50" },
-    { id: 7, type: "vscode", source: "VS Code", detail: "main.py — error resolved, file saved", time: "09:29:04", icon: CheckCircle2, color: "text-emerald-600 bg-emerald-50" },
-  ]);
+  const [rows, setRows] = useState<CaptureRow[]>([]);
+  const [connected, setConnected] = useState(false);
+  const [project, setProject] = useState("default");
+  const [sessionStart, setSessionStart] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const pausedRef = useRef(isPaused);
+
+  useEffect(() => {
+    pausedRef.current = isPaused;
+  }, [isPaused]);
+
+  useEffect(() => {
+    let disposed = false;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+
+    void fetchEvents(200).then((list) => {
+      if (disposed) return;
+      setRows(list.map(toCaptureRow));
+      if (list.length > 0) {
+        setProject(list[0].project);
+        setSessionStart(list[list.length - 1].ts);
+      }
+    });
+
+    const handle = connectEvents(
+      (list) => {
+        if (disposed) return;
+        setRows(list.map(toCaptureRow));
+        if (list.length > 0) {
+          setProject(list[0].project);
+          setSessionStart(list[list.length - 1].ts);
+        }
+      },
+      (event) => {
+        if (disposed || pausedRef.current) return;
+        setRows((prev) => [toCaptureRow(event), ...prev].slice(0, 300));
+      },
+      (status) => {
+        if (!disposed) setConnected(status);
+      },
+    );
+
+    return () => {
+      disposed = true;
+      handle.close();
+      clearInterval(timer);
+    };
+  }, []);
 
   const flowSteps = [
-    { label: "Chrome Tabs", icon: Globe, active: true },
-    { label: "Stack Overflow", icon: Search, active: true },
-    { label: "GitHub Issue", icon: GitBranch, active: true },
-    { label: "Documentation", icon: FileText, active: true },
-    { label: "VS Code", icon: Code, active: true },
-    { label: "Terminal", icon: Terminal, active: true },
-    { label: "Context Captured", icon: CheckCircle2, active: false, final: true },
+    { label: "Chrome Tabs", icon: Globe, active: rows.length > 0 },
+    { label: "Browsing", icon: Search, active: rows.length > 0 },
+    { label: "Pages Visited", icon: GitBranch, active: rows.length > 0 },
+    { label: "Documentation", icon: FileText, active: rows.length > 0 },
+    { label: "Context Signal", icon: Code, active: rows.length > 0 },
+    { label: "Dwell Time", icon: Clock, active: rows.length > 0 },
+    { label: "Context Captured", icon: CheckCircle2, active: rows.length > 0, final: true },
+  ];
+
+  const durationMs = sessionStart ? Math.max(0, now - sessionStart) : 0;
+  const sessionInfo = [
+    { label: "Project", value: project === "default" ? "Default" : project },
+    { label: "Duration", value: formatDuration(durationMs) },
+    { label: "Events captured", value: String(rows.length) },
+    { label: "Connection", value: connected ? "Live" : "Reconnecting" },
+    { label: "Status", value: isPaused ? "Paused" : "Session active" },
   ];
 
   return (
     <DashboardLayout navigate={navigate} active="capture">
-      <div className="p-8">
-        <div className="flex items-center justify-between mb-8">
+      <div className="p-4 sm:p-6 md:p-8">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-0 sm:justify-between mb-6 sm:mb-8">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Live Capture</h1>
-            <p className="text-muted-foreground mt-1">FlowSync is recording your current debugging session.</p>
+            <h1 className="text-xl sm:text-2xl font-bold text-foreground">Live Capture</h1>
+            <p className="text-muted-foreground mt-1">FlowSync is recording your current browsing context.</p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-medium px-3 py-1.5 rounded-full">
-              <div className={`w-1.5 h-1.5 rounded-full ${isPaused ? "bg-gray-400" : "bg-emerald-500 animate-pulse"}`} />
-              {isPaused ? "Paused" : "Capturing"}
+              <div className={`w-1.5 h-1.5 rounded-full ${!connected || isPaused ? "bg-gray-400" : "bg-emerald-500 animate-pulse"}`} />
+              {!connected ? "Reconnecting" : isPaused ? "Paused" : "Capturing"}
             </div>
             <button
               onClick={() => setIsPaused(!isPaused)}
-              className="flex items-center gap-2 border border-border bg-white text-sm font-medium text-foreground px-4 py-2 rounded-xl hover:bg-gray-50 transition-colors"
+              className="flex items-center gap-2 border border-border bg-white text-sm font-medium text-foreground px-4 py-2 min-h-11 sm:min-h-0 rounded-xl hover:bg-gray-50 transition-colors"
             >
               {isPaused ? <Play size={14} /> : <Pause size={14} />}
               {isPaused ? "Resume" : "Pause"}
@@ -492,33 +618,39 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
           {/* Activity feed */}
           <div className="xl:col-span-2">
             <Card className="overflow-hidden">
-              <div className="px-6 py-4 border-b border-border flex items-center justify-between">
+              <div className="px-4 sm:px-6 py-4 border-b border-border flex items-center justify-between">
                 <h2 className="font-semibold text-foreground">Activity Feed</h2>
-                <Badge color="blue">{events.length} events</Badge>
+                <Badge color="blue">{rows.length} events</Badge>
               </div>
               <div className="divide-y divide-border max-h-[520px] overflow-y-auto">
-                {events.map((event, i) => {
-                  const Icon = event.icon;
-                  return (
-                    <div key={event.id} className="px-6 py-4 flex items-start gap-4 hover:bg-gray-50 transition-colors">
-                      <div className="flex flex-col items-center gap-1 flex-shrink-0 w-16 text-right">
-                        <div className="text-xs font-mono text-muted-foreground">{event.time}</div>
-                      </div>
-                      <div className="flex items-start gap-3 flex-1">
-                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 ${event.color}`}>
-                          <Icon size={14} />
+                {rows.length === 0 ? (
+                  <div className="px-4 sm:px-6 py-12 text-center text-sm text-muted-foreground">
+                    No events yet — browse a page and FlowSync events will appear here live.
+                  </div>
+                ) : (
+                  rows.map((row, i) => {
+                    const RowIcon = row.icon;
+                    return (
+                      <div key={row.id} className="px-4 sm:px-6 py-4 flex items-start gap-4 hover:bg-gray-50 transition-colors">
+                        <div className="flex flex-col items-center gap-1 flex-shrink-0 w-14 sm:w-16 text-right">
+                          <div className="text-xs font-mono text-muted-foreground">{row.time}</div>
                         </div>
-                        <div>
-                          <div className="text-sm font-semibold text-foreground">{event.source}</div>
-                          <div className="text-sm text-muted-foreground mt-0.5">{event.detail}</div>
+                        <div className="flex items-start gap-3 flex-1">
+                          <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 ${row.color}`}>
+                            <RowIcon size={14} />
+                          </div>
+                          <div>
+                            <div className="text-sm font-semibold text-foreground">{row.source}</div>
+                            <div className="text-sm text-muted-foreground mt-0.5">{row.detail}</div>
+                          </div>
                         </div>
+                        {i === rows.length - 1 && connected && !isPaused && (
+                          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0 mt-2" />
+                        )}
                       </div>
-                      {i === events.length - 1 && !isPaused && (
-                        <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0 mt-2" />
-                      )}
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </div>
             </Card>
           </div>
@@ -554,13 +686,7 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
             <Card className="p-5">
               <h3 className="text-sm font-semibold text-foreground mb-4">Session Info</h3>
               <dl className="space-y-3">
-                {[
-                  { label: "Project", value: "AI Document Summarizer" },
-                  { label: "Duration", value: "6m 14s" },
-                  { label: "Events captured", value: "7" },
-                  { label: "Error type", value: "ModuleNotFoundError" },
-                  { label: "Status", value: "Session active" },
-                ].map((item) => (
+                {sessionInfo.map((item) => (
                   <div key={item.label} className="flex justify-between text-sm">
                     <dt className="text-muted-foreground">{item.label}</dt>
                     <dd className="font-medium text-foreground text-right">{item.value}</dd>
@@ -582,17 +708,17 @@ function VSCodeScreen({ navigate }: { navigate: (s: Screen) => void }) {
 
   return (
     <DashboardLayout navigate={navigate} active="vscode">
-      <div className="p-8">
-        <div className="flex items-center justify-between mb-8">
+      <div className="p-4 sm:p-6 md:p-8">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-0 sm:justify-between mb-6 sm:mb-8">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">VS Code Extension</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-foreground">VS Code Extension</h1>
             <p className="text-muted-foreground mt-1">FlowSync surfaces recovered context directly inside your editor.</p>
           </div>
           <Badge color="blue">Hero Screen</Badge>
         </div>
 
         {/* VS Code mockup */}
-        <div className="rounded-2xl overflow-hidden border border-gray-300 shadow-2xl shadow-gray-200">
+        <div className="rounded-2xl overflow-x-auto md:overflow-hidden border border-gray-300 shadow-2xl shadow-gray-200">
           {/* Title bar */}
           <div className="bg-[#1e1e2e] px-4 py-2.5 flex items-center gap-3">
             <div className="flex gap-1.5">
@@ -604,7 +730,7 @@ function VSCodeScreen({ navigate }: { navigate: (s: Screen) => void }) {
           </div>
 
           {/* Editor body */}
-          <div className="bg-[#1e1e2e] flex" style={{ height: "520px" }}>
+          <div className="bg-[#1e1e2e] flex min-w-[640px] md:min-w-0" style={{ height: "520px" }}>
             {/* File tree */}
             <div className="w-44 border-r border-[#2d2d3e] p-2 flex-shrink-0 bg-[#252535]">
               <div className="text-[10px] text-gray-500 uppercase tracking-widest px-2 mb-2">Explorer</div>
@@ -778,22 +904,22 @@ function TimelineScreen({ navigate }: { navigate: (s: Screen) => void }) {
 
   return (
     <DashboardLayout navigate={navigate} active="timeline">
-      <div className="p-8">
-        <div className="flex items-center justify-between mb-8">
+      <div className="p-4 sm:p-6 md:p-8">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-0 sm:justify-between mb-6 sm:mb-8">
           <div>
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2 flex-wrap mb-1">
               <button onClick={() => navigate("vscode")} className="text-sm text-primary hover:underline flex items-center gap-1">
                 <ChevronRight size={14} className="rotate-180" /> VS Code Extension
               </button>
               <span className="text-muted-foreground">/</span>
               <span className="text-sm text-foreground">Recovered Session</span>
             </div>
-            <h1 className="text-2xl font-bold text-foreground">Recovered Session Timeline</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-foreground">Recovered Session Timeline</h1>
             <p className="text-muted-foreground mt-1">AI Document Summarizer — 14 March 2026 — ModuleNotFoundError</p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <Badge color="green">92% match</Badge>
-            <button className="flex items-center gap-2 border border-border bg-white text-sm font-medium text-foreground px-4 py-2 rounded-xl hover:bg-gray-50 transition-colors">
+            <button className="flex items-center gap-2 border border-border bg-white text-sm font-medium text-foreground px-4 py-2 min-h-11 sm:min-h-0 rounded-xl hover:bg-gray-50 transition-colors">
               <Copy size={14} /> Export session
             </button>
           </div>
@@ -805,7 +931,7 @@ function TimelineScreen({ navigate }: { navigate: (s: Screen) => void }) {
               const Icon = event.icon;
               const isLast = i === events.length - 1;
               return (
-                <div key={i} className="flex gap-6">
+                <div key={i} className="flex gap-4 sm:gap-6">
                   {/* Timeline spine */}
                   <div className="flex flex-col items-center">
                     <div className={`w-10 h-10 rounded-xl border-2 flex items-center justify-center flex-shrink-0 ${event.color} ${event.isFinal ? "shadow-lg shadow-emerald-100" : ""}`}>
@@ -822,14 +948,14 @@ function TimelineScreen({ navigate }: { navigate: (s: Screen) => void }) {
                           <span className="text-xs font-mono text-muted-foreground">{event.time}</span>
                           <span className={`text-sm font-semibold ${event.isFinal ? "text-emerald-600" : "text-foreground"}`}>{event.title}</span>
                         </div>
-                        <div className={`text-sm ${event.isFinal ? "text-emerald-600 font-medium" : "text-muted-foreground"} ${event.isCode ? "font-mono bg-gray-100 px-3 py-2 rounded-lg text-xs mt-2" : "mt-0.5"}`}>
+                        <div className={`text-sm ${event.isFinal ? "text-emerald-600 font-medium" : "text-muted-foreground"} ${event.isCode ? "font-mono bg-gray-100 px-3 py-2 rounded-lg text-xs mt-2 break-all" : "mt-0.5"}`}>
                           {event.detail}
                         </div>
                       </div>
                       {event.action && (
                         <button
                           onClick={() => event.action?.type === "copy" ? handleCopy(event.action.cmd!, i) : undefined}
-                          className="flex items-center gap-1.5 text-xs font-medium text-primary bg-blue-50 border border-blue-200 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition-colors flex-shrink-0 mt-1"
+                          className="flex items-center gap-1.5 text-xs font-medium text-primary bg-blue-50 border border-blue-200 px-3 py-3 sm:py-1.5 rounded-lg hover:bg-blue-100 transition-colors flex-shrink-0 mt-1"
                         >
                           {event.action.type === "copy" ? (copiedCmd === i ? <Check size={12} /> : <Copy size={12} />) : <ExternalLink size={12} />}
                           {copiedCmd === i ? "Copied!" : event.action.label}
@@ -881,13 +1007,13 @@ function PrivacyScreen({ navigate }: { navigate: (s: Screen) => void }) {
 
   return (
     <DashboardLayout navigate={navigate} active="privacy">
-      <div className="p-8">
-        <div className="flex items-center justify-between mb-8">
+      <div className="p-4 sm:p-6 md:p-8">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-0 sm:justify-between mb-6 sm:mb-8">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Privacy Center</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-foreground">Privacy Center</h1>
             <p className="text-muted-foreground mt-1">Everything FlowSync knows about you — and how it stays on your machine.</p>
           </div>
-          <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm font-medium px-4 py-2 rounded-xl">
+          <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm font-medium px-4 py-2 min-h-11 sm:min-h-0 rounded-xl">
             <CheckCircle2 size={16} />
             Security health: Excellent
           </div>
@@ -925,7 +1051,7 @@ function PrivacyScreen({ navigate }: { navigate: (s: Screen) => void }) {
               </div>
               <button
                 onClick={() => setCloudSync(!cloudSync)}
-                className={`w-11 h-6 rounded-full flex items-center transition-colors flex-shrink-0 mt-0.5 ${cloudSync ? "bg-primary justify-end" : "bg-gray-200 justify-start"}`}
+                className={`relative w-11 h-6 rounded-full flex items-center transition-colors flex-shrink-0 mt-0.5 before:absolute before:-inset-2.5 before:content-[''] ${cloudSync ? "bg-primary justify-end" : "bg-gray-200 justify-start"}`}
               >
                 <div className="w-5 h-5 rounded-full bg-white shadow mx-0.5" />
               </button>
@@ -939,17 +1065,17 @@ function PrivacyScreen({ navigate }: { navigate: (s: Screen) => void }) {
 
           {/* Privacy timeline */}
           <Card className="overflow-hidden">
-            <div className="px-6 py-4 border-b border-border">
+            <div className="px-4 sm:px-6 py-4 border-b border-border">
               <h2 className="font-semibold text-foreground">Privacy Timeline</h2>
             </div>
             <div className="divide-y divide-border">
               {privacyTimeline.map((item) => (
-                <div key={item.time} className="px-6 py-4">
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="text-sm font-medium text-foreground">{item.event}</div>
+                <div key={item.time} className="px-4 sm:px-6 py-4">
+                  <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
+                    <div className="text-sm font-medium text-foreground min-w-0 break-words">{item.event}</div>
                     <span className="text-xs text-muted-foreground flex-shrink-0 ml-3">{item.time}</span>
                   </div>
-                  <div className="flex gap-4 mt-1">
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
                     <span className="text-xs text-muted-foreground">Stored: <span className="font-medium text-foreground">{item.stored}</span></span>
                     <span className="text-xs text-muted-foreground">Shared: <span className="font-medium text-foreground">{item.shared}</span></span>
                   </div>
@@ -960,7 +1086,7 @@ function PrivacyScreen({ navigate }: { navigate: (s: Screen) => void }) {
         </div>
 
         {/* Trust statement */}
-        <Card className="mt-6 p-8 bg-blue-50 border-blue-100 text-center">
+        <Card className="mt-6 p-6 md:p-8 bg-blue-50 border-blue-100 text-center">
           <div className="text-sm font-semibold text-primary mb-2 uppercase tracking-widest">Built on trust, not blind faith</div>
           <p className="text-foreground font-medium max-w-xl mx-auto">
             FlowSync only ever reconstructs things you already did — nothing to "trust," only to verify. Your own past work, surfaced when you need it.
@@ -1001,16 +1127,16 @@ function SettingsScreen({ navigate }: { navigate: (s: Screen) => void }) {
 
   return (
     <DashboardLayout navigate={navigate} active="settings">
-      <div className="flex h-full">
+      <div className="flex h-full flex-col md:flex-row">
         {/* Settings sidebar */}
-        <div className="w-56 border-r border-border p-4 flex-shrink-0">
-          <div className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-3 px-2">Settings</div>
-          <nav className="space-y-0.5">
+        <div className="w-full md:w-56 border-b md:border-b-0 md:border-r border-border px-2 py-2 md:p-4 flex-shrink-0 overflow-x-auto">
+          <div className="hidden md:block text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-3 px-2">Settings</div>
+          <nav className="flex md:flex-col items-center md:items-stretch gap-1 md:gap-0 md:space-y-0.5">
             {sections.map((s) => (
               <button
                 key={s.id}
                 onClick={() => setActiveSection(s.id)}
-                className={`w-full text-left px-3 py-2 rounded-xl text-sm transition-colors ${activeSection === s.id ? "bg-blue-50 text-primary font-medium" : "text-muted-foreground hover:bg-gray-50 hover:text-foreground"}`}
+                className={`w-auto md:w-full text-left whitespace-nowrap flex-shrink-0 px-3 py-3 md:py-2 rounded-xl text-sm transition-colors ${activeSection === s.id ? "bg-blue-50 text-primary font-medium" : "text-muted-foreground hover:bg-gray-50 hover:text-foreground"}`}
               >
                 {s.label}
               </button>
@@ -1019,7 +1145,7 @@ function SettingsScreen({ navigate }: { navigate: (s: Screen) => void }) {
         </div>
 
         {/* Settings content */}
-        <div className="flex-1 p-8 overflow-y-auto">
+        <div className="flex-1 p-4 md:p-8 overflow-y-auto">
           {activeSection === "capture" && (
             <div className="max-w-xl space-y-6">
               <div>
@@ -1040,7 +1166,7 @@ function SettingsScreen({ navigate }: { navigate: (s: Screen) => void }) {
                     </div>
                     <button
                       onClick={() => item.set(!item.state)}
-                      className={`w-11 h-6 rounded-full flex items-center transition-colors flex-shrink-0 mt-0.5 ${item.state ? "bg-primary justify-end" : "bg-gray-200 justify-start"}`}
+                      className={`relative w-11 h-6 rounded-full flex items-center transition-colors flex-shrink-0 mt-0.5 before:absolute before:-inset-2.5 before:content-[''] ${item.state ? "bg-primary justify-end" : "bg-gray-200 justify-start"}`}
                     >
                       <div className="w-5 h-5 rounded-full bg-white shadow mx-0.5" />
                     </button>
@@ -1064,7 +1190,7 @@ function SettingsScreen({ navigate }: { navigate: (s: Screen) => void }) {
                   </div>
                   <button
                     onClick={() => setDarkMode(!darkMode)}
-                    className={`w-11 h-6 rounded-full flex items-center transition-colors ${darkMode ? "bg-primary justify-end" : "bg-gray-200 justify-start"}`}
+                    className={`relative w-11 h-6 rounded-full flex items-center transition-colors before:absolute before:-inset-2.5 before:content-[''] ${darkMode ? "bg-primary justify-end" : "bg-gray-200 justify-start"}`}
                   >
                     <div className="w-5 h-5 rounded-full bg-white shadow mx-0.5" />
                   </button>
@@ -1074,7 +1200,7 @@ function SettingsScreen({ navigate }: { navigate: (s: Screen) => void }) {
                 <div className="text-sm font-medium text-foreground mb-3">Font size</div>
                 <div className="flex gap-2">
                   {["Small", "Medium", "Large"].map((size) => (
-                    <button key={size} className={`flex-1 py-2 rounded-xl text-sm border transition-colors ${size === "Medium" ? "border-primary bg-blue-50 text-primary font-medium" : "border-border text-muted-foreground hover:border-gray-300"}`}>
+                    <button key={size} className={`flex-1 py-2 min-h-11 sm:min-h-0 rounded-xl text-sm border transition-colors ${size === "Medium" ? "border-primary bg-blue-50 text-primary font-medium" : "border-border text-muted-foreground hover:border-gray-300"}`}>
                       {size}
                     </button>
                   ))}
@@ -1092,9 +1218,9 @@ function SettingsScreen({ navigate }: { navigate: (s: Screen) => void }) {
               <Card className="overflow-hidden">
                 <div className="divide-y divide-border">
                   {shortcuts.map((s) => (
-                    <div key={s.action} className="px-5 py-4 flex items-center justify-between hover:bg-gray-50 cursor-pointer group">
+                    <div key={s.action} className="px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-0 sm:justify-between hover:bg-gray-50 cursor-pointer group">
                       <div className="text-sm text-foreground">{s.action}</div>
-                      <div className="flex items-center gap-1">
+                      <div className="flex items-center gap-1 flex-wrap">
                         {s.keys.map((k, i) => (
                           <span key={i} className="text-xs font-mono bg-gray-100 border border-gray-200 text-foreground px-2 py-1 rounded-lg">{k}</span>
                         ))}
@@ -1138,10 +1264,10 @@ function ArchitectureScreen({ navigate }: { navigate: (s: Screen) => void }) {
 
   return (
     <DashboardLayout navigate={navigate} active="architecture">
-      <div className="p-8">
-        <div className="flex items-center justify-between mb-8">
+      <div className="p-4 sm:p-6 md:p-8">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-0 sm:justify-between mb-6 sm:mb-8">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">System Architecture</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-foreground">System Architecture</h1>
             <p className="text-muted-foreground mt-1">How the components hand off context, end to end.</p>
           </div>
         </div>
@@ -1151,7 +1277,7 @@ function ArchitectureScreen({ navigate }: { navigate: (s: Screen) => void }) {
           {/* Input layer */}
           <div className="mb-4">
             <div className="text-xs font-semibold text-muted-foreground uppercase tracking-widest text-center mb-4">Input Layer</div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               {nodes.slice(0, 2).map((node) => {
                 const Icon = node.icon;
                 return (
@@ -1160,12 +1286,12 @@ function ArchitectureScreen({ navigate }: { navigate: (s: Screen) => void }) {
                       <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${node.highlight ? "bg-white/20" : "bg-blue-50"}`}>
                         <Icon size={16} className={node.highlight ? "text-white" : "text-primary"} />
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <div className="flex items-center gap-2 mb-0.5">
                           <div className="text-sm font-semibold text-foreground">{node.label}</div>
                           <Badge color="gray">{node.badge}</Badge>
                         </div>
-                        <div className="text-xs text-muted-foreground leading-relaxed">{node.sub}</div>
+                        <div className="text-xs text-muted-foreground leading-relaxed break-words">{node.sub}</div>
                       </div>
                     </div>
                   </Card>
@@ -1192,12 +1318,12 @@ function ArchitectureScreen({ navigate }: { navigate: (s: Screen) => void }) {
                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${node.highlight ? "bg-white/20" : "bg-amber-50"}`}>
                       <Icon size={18} className={node.highlight ? "text-white" : "text-amber-600"} />
                     </div>
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-0.5">
                         <div className={`font-semibold ${node.highlight ? "text-white" : "text-foreground"}`}>{node.label}</div>
                         <Badge color={node.highlight ? "blue" : "yellow"}>{node.badge}</Badge>
                       </div>
-                      <div className={`text-sm ${node.highlight ? "text-blue-100" : "text-muted-foreground"}`}>{node.sub}</div>
+                      <div className={`text-sm ${node.highlight ? "text-blue-100" : "text-muted-foreground"} break-words`}>{node.sub}</div>
                     </div>
                   </div>
                 </Card>
@@ -1229,12 +1355,12 @@ function ArchitectureScreen({ navigate }: { navigate: (s: Screen) => void }) {
                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${node.id === "retrieval" ? "bg-emerald-100" : "bg-gray-100"}`}>
                       <Icon size={18} className={node.id === "retrieval" ? "text-emerald-600" : "text-gray-600"} />
                     </div>
-                    <div className="flex-1">
+                    <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-0.5">
                         <div className="font-semibold text-foreground">{node.label}</div>
                         <Badge color={node.id === "retrieval" ? "green" : "gray"}>{node.badge}</Badge>
                       </div>
-                      <div className="text-sm text-muted-foreground">{node.sub}</div>
+                      <div className="text-sm text-muted-foreground break-words">{node.sub}</div>
                     </div>
                   </div>
                 </Card>
