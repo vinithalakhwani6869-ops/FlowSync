@@ -7,6 +7,17 @@ const MAX_VISIT_URLS = 500;
 
 type VisitMap = Record<string, number>;
 
+export function sanitizeUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.search = "";
+    parsed.hash = "";
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return url;
+  }
+}
+
 async function readBuffer(): Promise<FlowSyncEvent[]> {
   const data = await chrome.storage.local.get(BUFFER_KEY);
   const buffer = data[BUFFER_KEY];
@@ -19,7 +30,11 @@ async function writeBuffer(buffer: FlowSyncEvent[]): Promise<void> {
 
 export async function pushEvent(event: FlowSyncEvent): Promise<void> {
   const buffer = await readBuffer();
-  buffer.push(event);
+  const sanitized = { ...event };
+  if (sanitized.payload && typeof sanitized.payload.url === "string") {
+    sanitized.payload = { ...sanitized.payload, url: sanitizeUrl(sanitized.payload.url) };
+  }
+  buffer.push(sanitized);
   if (buffer.length > MAX_BUFFER_EVENTS) {
     const dropped = buffer.length - MAX_BUFFER_EVENTS;
     buffer.splice(0, dropped);
@@ -49,8 +64,9 @@ async function readVisits(): Promise<VisitMap> {
 
 export async function nextVisitCount(url: string): Promise<number> {
   const visits = await readVisits();
-  const count = (visits[url] ?? 0) + 1;
-  visits[url] = count;
+  const cleanUrl = sanitizeUrl(url);
+  const count = (visits[cleanUrl] ?? 0) + 1;
+  visits[cleanUrl] = count;
 
   const keys = Object.keys(visits);
   if (keys.length > MAX_VISIT_URLS) {

@@ -1,6 +1,7 @@
 import { configureClient, postEvents, uuid } from "./api/client";
 import type { FlowSyncEvent } from "./api/client";
 import { ackSynced, getBuffer, nextVisitCount, pushEvent } from "./storage";
+import { isDomainAllowed } from "./domains";
 
 const PROJECT_ID = "default";
 const FLUSH_DELAY_MS = 1500;
@@ -105,7 +106,12 @@ async function handleActivated(tabId: number): Promise<void> {
   const info = await safeGetTab(tabId);
   if (info && isTrackableUrl(info.url)) {
     const prev = tabs.get(tabId);
-    if (!prev || prev.url !== info.url || prev.lastSeen === 0) {
+    if (!(await isDomainAllowed(info.url))) {
+      if (prev && prev.lastSeen > 0) {
+        await closeDwell(prev, now);
+        tabs.delete(tabId);
+      }
+    } else if (!prev || prev.url !== info.url || prev.lastSeen === 0) {
       await ensureTracked(tabId, info.url, info.title, now, true);
     } else {
       prev.lastSeen = now;
@@ -122,6 +128,15 @@ async function handleUpdated(tabId: number): Promise<void> {
 
   const now = Date.now();
   const prev = tabs.get(tabId);
+
+  if (!(await isDomainAllowed(info.url))) {
+    if (prev && prev.lastSeen > 0) {
+      await closeDwell(prev, now);
+    }
+    tabs.delete(tabId);
+    scheduleFlush();
+    return;
+  }
 
   if (!prev || prev.url !== info.url) {
     const emitVisit = tabId === lastActiveTabId;

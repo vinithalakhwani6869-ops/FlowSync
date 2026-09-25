@@ -77,6 +77,14 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
 export async function postEvents(events: FlowSyncEvent[]): Promise<SyncResult> {
   if (events.length === 0) return { syncedIds: [], retryable: false };
 
+  if (!config.authToken) {
+    console.warn(
+      "[flowsync] No API key configured — skipping sync. " +
+        "Set 'config:auth-token' in chrome.storage.local (or the extension setup flow) before events can be sent.",
+    );
+    return { syncedIds: [], retryable: false };
+  }
+
   for (let attempt = 0; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
       const headers: Record<string, string> = { "content-type": "application/json" };

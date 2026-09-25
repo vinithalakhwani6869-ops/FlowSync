@@ -57,13 +57,29 @@ export interface LiveEventsHandle {
 
 const RECONNECT_MS = 3000;
 
+// The web app authenticates to the backend WebSocket with the same API key the
+// Chrome extension uses (FLOWSYNC_API_KEY in backend/.env). Live Capture connects
+// only once a key is present — set it in the browser before opening the app:
+//   localStorage.setItem("flowsync:api-key", "<your api key>")
+const API_KEY_STORAGE_KEY = "flowsync:api-key";
+
+function getApiKey(): string {
+  try {
+    const stored = window.localStorage.getItem(API_KEY_STORAGE_KEY);
+    if (stored && stored.trim().length > 0) return stored.trim();
+  } catch {
+    // localStorage unavailable — treated as no key
+  }
+  return "";
+}
+
 export function connectEvents(
   onInit: (events: FlowSyncEvent[]) => void,
   onEvent: (event: FlowSyncEvent) => void,
   onStatus: (connected: boolean) => void,
 ): LiveEventsHandle {
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
-  const url = `${scheme}://${window.location.host}/ws/events?token=dev`;
+  const url = () => `${scheme}://${window.location.host}/ws/events?token=${encodeURIComponent(getApiKey())}`;
 
   let socket: WebSocket | null = null;
   let closed = false;
@@ -78,7 +94,7 @@ export function connectEvents(
   const open = (): void => {
     if (closed) return;
     try {
-      socket = new WebSocket(url);
+      socket = new WebSocket(url());
     } catch {
       scheduleReconnect();
       return;
