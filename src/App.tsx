@@ -12,7 +12,7 @@ import {
   connectEvents, fetchEvents, fetchStats, formatDuration,
   formatHours, formatRelative, formatTime,
 } from "./lib/flowsync";
-import type { FlowSyncEvent, FlowSyncStats } from "./lib/flowsync";
+import type { FlowSyncEvent, FlowSyncStats, LiveConnectionStatus } from "./lib/flowsync";
 
 type Screen = "landing" | "dashboard" | "capture" | "vscode" | "timeline" | "privacy" | "settings" | "architecture";
 
@@ -524,7 +524,8 @@ function toCaptureRow(event: FlowSyncEvent): CaptureRow {
 function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
   const [isPaused, setIsPaused] = useState(false);
   const [rows, setRows] = useState<CaptureRow[]>([]);
-  const [connected, setConnected] = useState(false);
+  const [status, setStatus] = useState<LiveConnectionStatus>("connecting");
+  const [loadError, setLoadError] = useState(false);
   const [project, setProject] = useState("default");
   const [sessionStart, setSessionStart] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -538,14 +539,23 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
     let disposed = false;
     const timer = setInterval(() => setNow(Date.now()), 1000);
 
-    void fetchEvents(200).then((list) => {
-      if (disposed) return;
-      setRows(list.map(toCaptureRow));
-      if (list.length > 0) {
-        setProject(list[0].project);
-        setSessionStart(list[list.length - 1].ts);
-      }
-    });
+    const load = () => {
+      setLoadError(false);
+      void fetchEvents(200)
+        .then((list) => {
+          if (disposed) return;
+          setRows(list.map(toCaptureRow));
+          if (list.length > 0) {
+            setProject(list[0].project);
+            setSessionStart(list[list.length - 1].ts);
+          }
+        })
+        .catch(() => {
+          if (!disposed) setLoadError(true);
+        });
+    };
+
+    load();
 
     const handle = connectEvents(
       (list) => {
@@ -560,8 +570,8 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
         if (disposed || pausedRef.current) return;
         setRows((prev) => [toCaptureRow(event), ...prev].slice(0, 300));
       },
-      (status) => {
-        if (!disposed) setConnected(status);
+      (nextStatus) => {
+        if (!disposed) setStatus(nextStatus);
       },
     );
 
@@ -571,6 +581,10 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
       clearInterval(timer);
     };
   }, []);
+
+  const isLive = status === "live";
+  const isNoKey = status === "no-key";
+  const isReconnecting = status === "reconnecting" || status === "connecting";
 
   const flowSteps = [
     { label: "Chrome Tabs", icon: Globe, active: rows.length > 0 },
@@ -587,7 +601,7 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
     { label: "Project", value: project === "default" ? "Default" : project },
     { label: "Duration", value: formatDuration(durationMs) },
     { label: "Events captured", value: String(rows.length) },
-    { label: "Connection", value: connected ? "Live" : "Reconnecting" },
+    { label: "Connection", value: isNoKey ? "API key required" : isLive ? "Live" : "Reconnecting" },
     { label: "Status", value: isPaused ? "Paused" : "Session active" },
   ];
 
@@ -601,8 +615,8 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-medium px-3 py-1.5 rounded-full">
-              <div className={`w-1.5 h-1.5 rounded-full ${!connected || isPaused ? "bg-gray-400" : "bg-emerald-500 animate-pulse"}`} />
-              {!connected ? "Reconnecting" : isPaused ? "Paused" : "Capturing"}
+              <div className={`w-1.5 h-1.5 rounded-full ${!isLive || isPaused || isNoKey ? "bg-gray-400" : "bg-emerald-500 animate-pulse"}`} />
+              {isNoKey ? "API key required" : !isLive ? "Reconnecting" : isPaused ? "Paused" : "Capturing"}
             </div>
             <button
               onClick={() => setIsPaused(!isPaused)}
@@ -623,7 +637,27 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
                 <Badge color="blue">{rows.length} events</Badge>
               </div>
               <div className="divide-y divide-border max-h-[520px] overflow-y-auto">
-                {rows.length === 0 ? (
+                {isNoKey && (
+                  <div className="px-4 sm:px-6 py-3 bg-amber-50 border-b border-amber-200 text-xs text-amber-800">
+                    Live updates are off — no API key set. Add it and refresh:{" "}
+                    <code className="font-mono bg-amber-100 px-1.5 py-0.5 rounded">
+                      localStorage.setItem("flowsync:api-key", "&lt;your key&gt;")
+                    </code>
+                  </div>
+                )}
+                {loadError ? (
+                  <div className="px-4 sm:px-6 py-12 text-center">
+                    <div className="text-sm text-muted-foreground mb-4">
+                      Could not reach the FlowSync backend at /api/v1/events.
+                    </div>
+                    <button
+                      onClick={() => { setLoadError(false); void fetchEvents(200).then((list) => setRows(list.map(toCaptureRow))).catch(() => setLoadError(true)); }}
+                      className="inline-flex items-center gap-2 border border-border bg-white text-sm font-medium text-foreground px-4 py-2 rounded-xl hover:bg-gray-50 transition-colors"
+                    >
+                      <RefreshCw size={14} /> Retry
+                    </button>
+                  </div>
+                ) : rows.length === 0 ? (
                   <div className="px-4 sm:px-6 py-12 text-center text-sm text-muted-foreground">
                     No events yet — browse a page and FlowSync events will appear here live.
                   </div>
@@ -644,7 +678,7 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
                             <div className="text-sm text-muted-foreground mt-0.5">{row.detail}</div>
                           </div>
                         </div>
-                        {i === rows.length - 1 && connected && !isPaused && (
+                        {i === rows.length - 1 && isLive && !isPaused && (
                           <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0 mt-2" />
                         )}
                       </div>

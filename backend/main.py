@@ -12,6 +12,9 @@ import database
 
 app = FastAPI(title="FlowSync API", version="0.1.0")
 
+from routes.events import router
+app.include_router(router)
+
 
 # A local backend/.env file is loaded first if present (real env vars always win).
 def _load_env_file(path: str) -> None:
@@ -130,22 +133,22 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/api/v1/events", dependencies=[Depends(verify_api_key)])
-async def post_events(batch: EventsBatch) -> dict[str, list[str]]:
-    rows = [event.model_dump(mode="json") for event in batch.events]
-    accepted = database.insert_events(rows)
-    for event in batch.events:
-        await manager.broadcast({"type": "event", "event": event.model_dump()})
-    return {"accepted": accepted}
+# @app.post("/api/v1/events", dependencies=[Depends(verify_api_key)])
+# async def post_events(batch: EventsBatch) -> dict[str, list[str]]:
+#     rows = [event.model_dump(mode="json") for event in batch.events]
+#     accepted = database.insert_events(rows)
+#     for event in batch.events:
+#         await manager.broadcast({"type": "event", "event": event.model_dump()})
+#     return {"accepted": accepted}
 
 
-@app.get("/api/v1/events")
-def get_events(
-    limit: int = Query(50, ge=1, le=500),
-    type: Optional[str] = Query(None, alias="type"),
-    project: Optional[str] = None,
-) -> dict[str, list[dict[str, Any]]]:
-    return {"events": database.list_events(limit=limit, event_type=type, project=project)}
+# @app.get("/api/v1/events")
+# def get_events(
+#     limit: int = Query(50, ge=1, le=500),
+#     type: Optional[str] = Query(None, alias="type"),
+#     project: Optional[str] = None,
+# ) -> dict[str, list[dict[str, Any]]]:
+#     return {"events": database.list_events(limit=limit, event_type=type, project=project)}
 
 
 @app.get("/api/v1/events/stats")
@@ -153,21 +156,21 @@ def get_stats() -> dict[str, Any]:
     return database.stats()
 
 
-@app.websocket("/ws/events")
-async def ws_events(
-    websocket: WebSocket,
-    token: Optional[str] = Query(None),
-) -> None:
-    if not token or not secrets.compare_digest(token, FLOWSYNC_API_KEY):
-        await websocket.close(code=4401)
-        return
-    await manager.connect(websocket)
-    try:
-        recent = database.list_events(50)
-        await websocket.send_json({"type": "init", "events": recent})
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
-    except Exception:
-        manager.disconnect(websocket)
+# @app.websocket("/ws/events")
+# async def ws_events(
+#     websocket: WebSocket,
+#     token: Optional[str] = Query(None),
+# ) -> None:
+#     if not token or not secrets.compare_digest(token, FLOWSYNC_API_KEY):
+#         await websocket.close(code=4401)
+#         return
+#     await manager.connect(websocket)
+#     try:
+#         recent = database.list_events(50)
+#         await websocket.send_json({"type": "init", "events": recent})
+#         while True:
+#             await websocket.receive_text()
+#     except WebSocketDisconnect:
+#         manager.disconnect(websocket)
+#     except Exception:
+#         manager.disconnect(websocket)

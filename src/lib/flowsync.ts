@@ -55,6 +55,8 @@ export interface LiveEventsHandle {
   close: () => void;
 }
 
+export type LiveConnectionStatus = "connecting" | "live" | "reconnecting" | "no-key";
+
 const RECONNECT_MS = 3000;
 
 // The web app authenticates to the backend WebSocket with the same API key the
@@ -76,7 +78,7 @@ function getApiKey(): string {
 export function connectEvents(
   onInit: (events: FlowSyncEvent[]) => void,
   onEvent: (event: FlowSyncEvent) => void,
-  onStatus: (connected: boolean) => void,
+  onStatus: (status: LiveConnectionStatus) => void,
 ): LiveEventsHandle {
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
   const url = () => `${scheme}://${window.location.host}/ws/events?token=${encodeURIComponent(getApiKey())}`;
@@ -85,9 +87,21 @@ export function connectEvents(
   let closed = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Without an API key the server rejects every handshake (403), so do not even
+  // attempt to connect — surface the missing-key state instead of spamming the
+  // console and flipping the UI between Live and Reconnecting forever.
+  if (!getApiKey()) {
+    onStatus("no-key");
+    return {
+      close(): void {
+        closed = true;
+      },
+    };
+  }
+
   const scheduleReconnect = (): void => {
     if (closed) return;
-    onStatus(false);
+    onStatus("reconnecting");
     reconnectTimer = setTimeout(open, RECONNECT_MS);
   };
 
@@ -100,7 +114,7 @@ export function connectEvents(
       return;
     }
 
-    socket.onopen = () => onStatus(true);
+    socket.onopen = () => onStatus("live");
 
     socket.onmessage = (message) => {
       let parsed: WsMessage | null = null;

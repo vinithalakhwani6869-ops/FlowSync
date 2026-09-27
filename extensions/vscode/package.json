@@ -1,0 +1,61 @@
+{
+  "name": "flowsync-vscode",
+  "displayName": "FlowSync",
+  "description": "Captures developer activity events from VS Code and syncs them to the FlowSync backend.",
+  "version": "0.1.0",
+  "publisher": "flowsync",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "flowsync.showPanel",
+        "title": "FlowSync: Show Panel"
+      },
+      {
+        "command": "flowsync.showOutput",
+        "title": "FlowSync: Show Output"
+      }
+    ],
+    "configuration": {
+      "title": "FlowSync",
+      "properties": {
+        "flowsync.baseUrl": {
+          "type": "string",
+          "default": "http://localhost:8000",
+          "description": "FlowSync backend base URL."
+        },
+        "flowsync.apiKey": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "API key for the FlowSync backend (must match FLOWSYNC_API_KEY)."
+        },
+        "flowsync.syncIntervalSec": {
+          "type": "number",
+          "default": 10,
+          "description": "How often buffered events are flushed to the backend (seconds)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p ./",
+    "package": "vsce package",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.74.0",
+    "@vscode/vsce": "^2.32.0",
+    "typescript": "^5.9.3"
+  }
+}
