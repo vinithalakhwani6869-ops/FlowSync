@@ -11,8 +11,15 @@ import {
 import {
   connectEvents, fetchEvents, fetchStats, formatDuration,
   formatHours, formatIdle, formatRelative, formatTime,
+  fetchSettings, updateSettings, fetchMeta, exportData, deleteAllData, downloadJson,
 } from "./lib/flowsync";
-import type { FlowSyncEvent, FlowSyncStats, LiveConnectionStatus } from "./lib/flowsync";
+import type {
+  FlowSyncEvent, FlowSyncStats, LiveConnectionStatus,
+  FlowSyncSettings, SettingsPatch, FlowSyncMeta,
+} from "./lib/flowsync";
+import { Toaster, toast } from "sonner";
+import { Popover, PopoverContent, PopoverTrigger } from "./components/ui/popover";
+import { Calendar } from "./components/ui/calendar";
 
 type Screen = "landing" | "dashboard" | "capture" | "vscode" | "timeline" | "privacy" | "settings" | "architecture";
 
@@ -84,7 +91,7 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
               <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center">
                 <Zap size={14} className="text-white" />
               </div>
-              <span className="font-semibold text-foreground text-[15px]">FlowSync</span>
+              <span className="font-semibold text-foreground text-[0.9375rem]">FlowSync</span>
             </div>
             <nav className="hidden md:flex items-center gap-6">
               {["Features", "How It Works", "Privacy", "Pricing", "Docs"].map((item) => (
@@ -116,7 +123,7 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
               <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
               Developer memory layer — not another AI assistant
             </div>
-            <h1 className="text-[32px] md:text-[52px] font-bold text-foreground leading-[1.1] tracking-tight mb-6">
+            <h1 className="text-[2rem] md:text-[3.25rem] font-bold text-foreground leading-[1.1] tracking-tight mb-6">
               FlowSync reconstructs the exact path that led to your fix -{" "}
               <span className="text-primary">automatically.</span>
             </h1>
@@ -169,7 +176,7 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
                     <Icon size={18} className={item.highlight ? "text-white" : "text-primary"} />
                   </div>
                   <div>
-                    <div className={`font-semibold text-[15px] ${item.highlight ? "text-white" : "text-foreground"}`}>{item.label}</div>
+                    <div className={`font-semibold text-[0.9375rem] ${item.highlight ? "text-white" : "text-foreground"}`}>{item.label}</div>
                     <div className={`text-xs mt-0.5 ${item.highlight ? "text-blue-100" : "text-muted-foreground"}`}>{item.sub}</div>
                   </div>
                 </div>
@@ -274,7 +281,7 @@ function DashboardLayout({ children, navigate, active }: { children: React.React
             <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center">
               <Zap size={14} className="text-white" />
             </div>
-            <span className="font-semibold text-foreground text-[15px]">FlowSync</span>
+            <span className="font-semibold text-foreground text-[0.9375rem]">FlowSync</span>
           </div>
         </div>
         <nav className="flex md:flex-col flex-1 md:p-3 md:space-y-0.5 items-center md:items-stretch gap-1 md:gap-0 px-2 py-1.5 overflow-x-auto md:overflow-y-auto">
@@ -733,12 +740,30 @@ function dayLabel(ts: number): string {
   });
 }
 
+// Label for the date-picker button only. The feed header keeps the shorter
+// weekday label above so its look does not change.
+function dateButtonLabel(ts: number): string {
+  const key = localDayKey(ts);
+  const today = Date.now();
+  if (key === localDayKey(today)) return "Today";
+  if (key === localDayKey(addLocalDays(startOfLocalDay(today), -1))) return "Yesterday";
+  return new Date(ts).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
 function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
   const [isPaused, setIsPaused] = useState(false);
+  const [settings, setSettings] = useState<FlowSyncSettings | null>(null);
+  const [pauseError, setPauseError] = useState(false);
   const [rawEvents, setRawEvents] = useState<FlowSyncEvent[]>([]);
   const [status, setStatus] = useState<LiveConnectionStatus>("connecting");
   const [loadError, setLoadError] = useState(false);
   const [selectedDay, setSelectedDay] = useState(() => startOfLocalDay(Date.now()));
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date(startOfLocalDay(Date.now())));
   const [reloadToken, setReloadToken] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   const pausedRef = useRef(isPaused);
@@ -748,8 +773,43 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
     pausedRef.current = isPaused;
   }, [isPaused]);
 
+  // Pause is stored on the backend so both extensions stop capturing too.
+  // Without a backend this stays local and the button reports the failure.
+  useEffect(() => {
+    let disposed = false;
+    void fetchSettings()
+      .then((next) => {
+        if (disposed) return;
+        setSettings(next);
+        setIsPaused(next.capture.paused);
+      })
+      .catch(() => {
+        // Keep the local default. The banner near the Pause button explains
+        // that the backend settings could not be loaded.
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  const togglePause = () => {
+    const next = !isPaused;
+    setIsPaused(next);
+    setPauseError(false);
+    setSettings((prev) =>
+      prev ? { ...prev, capture: { ...prev.capture, paused: next } } : prev,
+    );
+    void updateSettings({ capture: { paused: next } })
+      .then((saved) => setSettings(saved))
+      .catch(() => setPauseError(true));
+  };
+
   useEffect(() => {
     dayRef.current = selectedDay;
+  }, [selectedDay]);
+
+  useEffect(() => {
+    setCalendarMonth(new Date(selectedDay));
   }, [selectedDay]);
 
   useEffect(() => {
@@ -812,6 +872,7 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
   }, []);
 
   const rows = useMemo(() => toCaptureRows(rawEvents), [rawEvents]);
+  const idleGapMs = (settings?.capture.idleGapMinutes ?? 15) * 60 * 1000;
 
   const isLive = status === "live";
   const isNoKey = status === "no-key";
@@ -843,7 +904,10 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
   ];
 
   const changeDay = (delta: number) => setSelectedDay((day) => addLocalDays(day, delta));
-  const goToToday = () => setSelectedDay(startOfLocalDay(Date.now()));
+  const goToToday = () => {
+    setSelectedDay(startOfLocalDay(Date.now()));
+    setCalendarOpen(false);
+  };
 
   return (
     <DashboardLayout navigate={navigate} active="capture">
@@ -859,12 +923,18 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
               {isNoKey ? "API key required" : !isLive ? "Reconnecting" : isPaused ? "Paused" : "Capturing"}
             </div>
             <button
-              onClick={() => setIsPaused(!isPaused)}
+              onClick={togglePause}
+              aria-pressed={isPaused}
               className="flex items-center gap-2 border border-border bg-white text-sm font-medium text-foreground px-4 py-2 min-h-11 sm:min-h-0 rounded-xl hover:bg-gray-50 transition-colors"
             >
               {isPaused ? <Play size={14} /> : <Pause size={14} />}
               {isPaused ? "Resume" : "Pause"}
             </button>
+            {pauseError && (
+              <span className="text-xs text-amber-700 w-full sm:w-auto">
+                Pause could not be saved — check the backend API key.
+              </span>
+            )}
           </div>
         </div>
 
@@ -885,13 +955,45 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
                   >
                     <ChevronRight size={14} className="rotate-180" />
                   </button>
-                  <button
-                    onClick={goToToday}
-                    title="Jump to today"
-                    className="px-3 h-8 text-xs font-medium text-foreground border border-border bg-white rounded-lg hover:bg-gray-50 transition-colors"
-                  >
-                    {dayLabel(selectedDay)}
-                  </button>
+                  <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+                    <PopoverTrigger asChild>
+                      <button
+                        title="Choose a date"
+                        aria-haspopup="dialog"
+                        className="px-3 h-8 text-xs font-medium text-foreground border border-border bg-white rounded-lg hover:bg-gray-50 transition-colors"
+                      >
+                        {dateButtonLabel(selectedDay)}
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="center" collisionPadding={8}>
+                      <Calendar
+                        mode="single"
+                        selected={new Date(selectedDay)}
+                        month={calendarMonth}
+                        onMonthChange={setCalendarMonth}
+                        onSelect={(date) => {
+                          if (!date) return;
+                          setSelectedDay(startOfLocalDay(date.getTime()));
+                          setCalendarOpen(false);
+                        }}
+                        fromDate={new Date(2020, 0, 1)}
+                        toDate={new Date()}
+                        fromYear={2020}
+                        toYear={new Date().getFullYear()}
+                        captionLayout="dropdown"
+                        disabled={{ after: new Date() }}
+                        initialFocus
+                      />
+                      <div className="border-t border-border p-2">
+                        <button
+                          onClick={goToToday}
+                          className="w-full text-xs font-medium text-foreground rounded-md px-2 py-1.5 hover:bg-gray-50 transition-colors"
+                        >
+                          Jump to today
+                        </button>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
                   <button
                     onClick={() => changeDay(1)}
                     disabled={isToday}
@@ -941,7 +1043,7 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
                       const prev = rows[i - 1];
                       if (prev) {
                         const gap = prev.ts - row.ts;
-                        if (gap >= 15 * 60 * 1000) {
+                        if (gap >= idleGapMs) {
                           items.push(
                             <div key={`idle-${row.id}`} className="px-4 sm:px-6 py-2 flex items-center gap-3 bg-gray-50/70">
                               <div className="flex-1 h-px bg-border" />
@@ -965,7 +1067,7 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
                             <div className="min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <div className="text-sm font-semibold text-foreground">{row.title}</div>
-                                <span className={`inline-flex items-center px-1.5 py-0.5 text-[11px] font-medium rounded-full border ${row.sourceColor}`}>
+                                <span className={`inline-flex items-center px-1.5 py-0.5 text-[0.6875rem] font-medium rounded-full border ${row.sourceColor}`}>
                                   {row.sourceName}
                                 </span>
                               </div>
@@ -1065,7 +1167,7 @@ function VSCodeScreen({ navigate }: { navigate: (s: Screen) => void }) {
           <div className="bg-[#1e1e2e] flex min-w-[640px] md:min-w-0" style={{ height: "520px" }}>
             {/* File tree */}
             <div className="w-44 border-r border-[#2d2d3e] p-2 flex-shrink-0 bg-[#252535]">
-              <div className="text-[10px] text-gray-500 uppercase tracking-widest px-2 mb-2">Explorer</div>
+              <div className="text-[0.625rem] text-gray-500 uppercase tracking-widest px-2 mb-2">Explorer</div>
               {["📁 ai-summarizer", "  📄 main.py", "  📄 utils.py", "  📄 config.py", "  📁 tests", "📁 models", "📄 requirements.txt"].map((f, i) => (
                 <div key={i} className={`text-xs font-mono px-2 py-1 rounded cursor-pointer ${f.includes("main.py") ? "bg-[#2563EB]/30 text-blue-300" : "text-gray-400 hover:bg-[#2d2d3e]"}`}>
                   {f}
@@ -1132,18 +1234,18 @@ function VSCodeScreen({ navigate }: { navigate: (s: Screen) => void }) {
 
                       {/* Session info */}
                       <div className="space-y-2">
-                        <div className="text-[11px] uppercase tracking-widest text-gray-500">Matched Project</div>
+                        <div className="text-[0.6875rem] uppercase tracking-widest text-gray-500">Matched Project</div>
                         <div className="text-sm font-medium text-gray-200">AI Document Summarizer</div>
                       </div>
 
                       <div className="space-y-2">
-                        <div className="text-[11px] uppercase tracking-widest text-gray-500">Recovered Session</div>
+                        <div className="text-[0.6875rem] uppercase tracking-widest text-gray-500">Recovered Session</div>
                         <div className="text-sm font-medium text-gray-200">14 March 2026</div>
                       </div>
 
                       {/* Recovered knowledge */}
                       <div className="space-y-2">
-                        <div className="text-[11px] uppercase tracking-widest text-gray-500">Recovered Knowledge</div>
+                        <div className="text-[0.6875rem] uppercase tracking-widest text-gray-500">Recovered Knowledge</div>
                         <div className="space-y-1.5">
                           {[
                             "Stack Overflow",
@@ -1163,7 +1265,7 @@ function VSCodeScreen({ navigate }: { navigate: (s: Screen) => void }) {
 
                       {/* Recovery time */}
                       <div className="bg-[#1e1e2e] rounded-xl p-3 space-y-2">
-                        <div className="text-[11px] uppercase tracking-widest text-gray-500">Estimated Recovery</div>
+                        <div className="text-[0.6875rem] uppercase tracking-widest text-gray-500">Estimated Recovery</div>
                         <div className="flex items-end justify-between">
                           <div>
                             <div className="text-xl font-bold text-blue-400">12s</div>
@@ -1622,11 +1724,241 @@ function PrivacyScreen({ navigate }: { navigate: (s: Screen) => void }) {
 
 // ─── SETTINGS ────────────────────────────────────────────────────────────────
 
+const THEME_STORAGE_KEY = "flowsync:theme";
+const FONT_STORAGE_KEY = "flowsync:font-size";
+
+type FontSize = "small" | "medium" | "large";
+
+const FONT_SIZE_PX: Record<FontSize, string> = {
+  small: "14px",
+  medium: "16px",
+  large: "18px",
+};
+
+function readStoredTheme(): boolean {
+  try {
+    return window.localStorage.getItem(THEME_STORAGE_KEY) === "dark";
+  } catch {
+    return false;
+  }
+}
+
+function readStoredFontSize(): FontSize {
+  try {
+    const stored = window.localStorage.getItem(FONT_STORAGE_KEY);
+    return stored === "small" || stored === "large" ? stored : "medium";
+  } catch {
+    return "medium";
+  }
+}
+
+const DEFAULT_ALLOWED_DOMAINS = [
+  "github.com",
+  "gitlab.com",
+  "bitbucket.org",
+  "stackoverflow.com",
+  "npmjs.com",
+  "pypi.org",
+  "docs.python.org",
+  "developer.mozilla.org",
+  "localhost",
+  "127.0.0.1",
+  "vercel.app",
+  "railway.app",
+  "supabase.com",
+  "tailwindcss.com",
+  "reactjs.org",
+  "react.dev",
+  "nextjs.org",
+  "vitejs.dev",
+  "fastapi.tiangolo.com",
+  "devdocs.io",
+  "caniuse.com",
+  "regex101.com",
+  "codepen.io",
+  "codesandbox.io",
+  "replit.com",
+  "render.com",
+  "heroku.com",
+  "digitalocean.com",
+  "aws.amazon.com",
+  "console.cloud.google.com",
+  "portal.azure.com",
+  "leetcode.com",
+  "codeforces.com",
+  "codechef.com",
+  "hackerrank.com",
+  "geeksforgeeks.org",
+  "kaggle.com",
+  "huggingface.co",
+  "colab.research.google.com",
+];
+
+function mergeSettings(base: FlowSyncSettings, patch: SettingsPatch): FlowSyncSettings {
+  const next = { ...base };
+  for (const key of Object.keys(patch) as (keyof FlowSyncSettings)[]) {
+    const value = patch[key];
+    if (value === undefined) continue;
+    (next as unknown as Record<string, object>)[key] = {
+      ...(base as unknown as Record<string, object>)[key],
+      ...(value as object),
+    };
+  }
+  return next;
+}
+
+function SettingSwitch({
+  checked,
+  onChange,
+  disabled = false,
+  label,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`relative w-11 h-6 rounded-full flex items-center transition-colors flex-shrink-0 mt-0.5 before:absolute before:-inset-2.5 before:content-[''] ${checked ? "bg-primary justify-end" : "bg-gray-200 justify-start"} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
+    >
+      <div className="w-5 h-5 rounded-full bg-white shadow mx-0.5" />
+    </button>
+  );
+}
+
+function SettingsRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-2 border-b border-border last:border-0">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <span className="text-sm font-medium text-foreground text-right">{value}</span>
+    </div>
+  );
+}
+
 function SettingsScreen({ navigate }: { navigate: (s: Screen) => void }) {
   const [activeSection, setActiveSection] = useState("capture");
-  const [notifications, setNotifications] = useState(true);
-  const [autoCapture, setAutoCapture] = useState(true);
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = useState(readStoredTheme);
+  const [fontSize, setFontSize] = useState<FontSize>(readStoredFontSize);
+  const [settings, setSettings] = useState<FlowSyncSettings | null>(null);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [stats, setStats] = useState<FlowSyncStats | null>(null);
+  const [meta, setMeta] = useState<FlowSyncMeta | null>(null);
+  const [newDomain, setNewDomain] = useState("");
+  const [deleteStep, setDeleteStep] = useState<"idle" | "confirm">("idle");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteMessage, setDeleteMessage] = useState<string | null>(null);
+  const [exportMessage, setExportMessage] = useState<string | null>(null);
+  const saveSeq = useRef(0);
+
+  const loadSettings = () => {
+    setSettingsError(null);
+    void Promise.allSettled([fetchSettings(), fetchStats(), fetchMeta()]).then((results) => {
+      const [settingsResult, statsResult, metaResult] = results;
+      if (settingsResult.status === "fulfilled") {
+        setSettings(settingsResult.value);
+      } else {
+        setSettingsError(
+          'Could not load settings. Start the backend and set localStorage "flowsync:api-key" to your FLOWSYNC_API_KEY, then reload.',
+        );
+      }
+      if (statsResult.status === "fulfilled") setStats(statsResult.value);
+      if (metaResult.status === "fulfilled") setMeta(metaResult.value);
+    });
+  };
+
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", darkMode);
+    try {
+      window.localStorage.setItem(THEME_STORAGE_KEY, darkMode ? "dark" : "light");
+    } catch {
+      // Storage can be unavailable; the class still applies for this visit.
+    }
+  }, [darkMode]);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty("--font-size", FONT_SIZE_PX[fontSize]);
+    try {
+      window.localStorage.setItem(FONT_STORAGE_KEY, fontSize);
+    } catch {
+      // Storage can be unavailable; the size still applies for this visit.
+    }
+  }, [fontSize]);
+
+  const save = async (patch: SettingsPatch) => {
+    if (!settings) return;
+    const seq = ++saveSeq.current;
+    setSettings(mergeSettings(settings, patch));
+    setSettingsError(null);
+    try {
+      const saved = await updateSettings(patch);
+      if (seq === saveSeq.current) {
+        setSettings(saved);
+        window.dispatchEvent(new CustomEvent("flowsync:settings-updated", { detail: saved }));
+      }
+    } catch {
+      if (seq === saveSeq.current) {
+        setSettingsError("Could not save settings. Check that the backend is running and the API key is set.");
+        void fetchSettings().then(setSettings).catch(() => {});
+      }
+    }
+  };
+
+  const capture = settings?.capture;
+  const allowedDomains = settings?.chrome.allowedDomains ?? [];
+  const settingsReady = settings !== null;
+
+  const saveDomains = (domains: string[]) => {
+    void save({ chrome: { allowedDomains: domains } });
+  };
+
+  const addDomain = () => {
+    const normalized = newDomain.trim().toLowerCase().replace(/^\.+/, "").replace(/\/+$/, "");
+    setNewDomain("");
+    if (!normalized || allowedDomains.includes(normalized)) return;
+    saveDomains([...allowedDomains, normalized]);
+  };
+
+  const removeDomain = (domain: string) => {
+    saveDomains(allowedDomains.filter((entry) => entry !== domain));
+  };
+
+  const handleExport = async () => {
+    setExportMessage(null);
+    try {
+      const data = await exportData();
+      const day = new Date().toISOString().slice(0, 10);
+      downloadJson(data, `flowsync-export-${day}.json`);
+      setExportMessage(`Exported ${data.events.length} event(s).`);
+    } catch {
+      setExportMessage("Export failed. Check the backend and API key.");
+    }
+  };
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    setDeleteMessage(null);
+    try {
+      const deleted = await deleteAllData();
+      setDeleteStep("idle");
+      setDeleteMessage(`Deleted ${deleted} event(s).`);
+      void fetchStats().then(setStats).catch(() => {});
+    } catch {
+      setDeleteMessage("Delete failed. Check the backend and API key.");
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const sections = [
     { id: "capture", label: "Capture Preferences" },
@@ -1669,33 +2001,423 @@ function SettingsScreen({ navigate }: { navigate: (s: Screen) => void }) {
 
         {/* Settings content */}
         <div className="flex-1 p-4 md:p-8 overflow-y-auto">
+          {settingsError && (
+            <div className="max-w-xl mb-4 p-3 rounded-xl border border-amber-200 bg-amber-50 text-xs text-amber-800">
+              {settingsError}
+            </div>
+          )}
+          {!settingsReady && !settingsError && (
+            <div className="max-w-xl mb-4 text-xs text-muted-foreground">Loading settings…</div>
+          )}
+
           {activeSection === "capture" && (
             <div className="max-w-xl space-y-6">
               <div>
                 <h2 className="text-xl font-bold text-foreground mb-1">Capture Preferences</h2>
                 <p className="text-sm text-muted-foreground">Control how FlowSync records your debugging activity.</p>
               </div>
+
+              <Card className="p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="text-sm font-medium text-foreground">Pause all capture</div>
+                      {capture?.paused && <Badge color="yellow">Paused</Badge>}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Takes priority over every toggle below. Existing history is kept; new activity is not recorded.
+                    </div>
+                  </div>
+                  <SettingSwitch
+                    label="Pause all capture"
+                    checked={capture?.paused ?? false}
+                    disabled={!settingsReady}
+                    onChange={(next) => void save({ capture: { paused: next } })}
+                  />
+                </div>
+              </Card>
+
               {[
-                { label: "Auto-capture on error detection", desc: "Automatically begin a session when VS Code reports an error.", state: autoCapture, set: setAutoCapture },
-                { label: "Capture terminal commands", desc: "Record terminal history during active debug sessions.", state: true, set: () => {} },
-                { label: "Capture browser tabs", desc: "Log URLs visited while a VS Code error is active.", state: true, set: () => {} },
-                { label: "Capture personal notes", desc: "Include notes created during a session.", state: false, set: () => {} },
+                {
+                  label: "Auto-capture on error detection",
+                  desc: "Record VS Code diagnostics, failed commands, and stuck sessions.",
+                  checked: capture?.autoCaptureErrors ?? true,
+                  onChange: (next: boolean) => void save({ capture: { autoCaptureErrors: next } }),
+                  disabled: !settingsReady,
+                  comingSoon: false,
+                },
+                {
+                  label: "Capture terminal commands",
+                  desc: "Record failed terminal commands during active debug sessions.",
+                  checked: capture?.terminalCommands ?? true,
+                  onChange: (next: boolean) => void save({ capture: { terminalCommands: next } }),
+                  disabled: !settingsReady,
+                  comingSoon: false,
+                },
+                {
+                  label: "Capture browser tabs",
+                  desc: "Log URLs visited on the Chrome extension's allowed domains.",
+                  checked: capture?.browserTabs ?? true,
+                  onChange: (next: boolean) => void save({ capture: { browserTabs: next } }),
+                  disabled: !settingsReady,
+                  comingSoon: false,
+                },
+                {
+                  label: "Capture personal notes",
+                  desc: "Personal notes are not a FlowSync feature yet.",
+                  checked: false,
+                  onChange: () => {},
+                  disabled: true,
+                  comingSoon: true,
+                },
               ].map((item) => (
                 <Card key={item.label} className="p-5">
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1">
-                      <div className="text-sm font-medium text-foreground">{item.label}</div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <div className="text-sm font-medium text-foreground">{item.label}</div>
+                        {item.comingSoon && <Badge color="gray">Coming soon</Badge>}
+                      </div>
                       <div className="text-xs text-muted-foreground mt-1">{item.desc}</div>
                     </div>
-                    <button
-                      onClick={() => item.set(!item.state)}
-                      className={`relative w-11 h-6 rounded-full flex items-center transition-colors flex-shrink-0 mt-0.5 before:absolute before:-inset-2.5 before:content-[''] ${item.state ? "bg-primary justify-end" : "bg-gray-200 justify-start"}`}
-                    >
-                      <div className="w-5 h-5 rounded-full bg-white shadow mx-0.5" />
-                    </button>
+                    <SettingSwitch
+                      label={item.label}
+                      checked={item.checked}
+                      disabled={item.disabled}
+                      onChange={item.onChange}
+                    />
                   </div>
                 </Card>
               ))}
+
+              <Card className="p-5">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex-1">
+                    <div className="text-sm font-medium text-foreground">Idle gap divider</div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Show an idle marker in Live Capture when events are this far apart.
+                    </div>
+                  </div>
+                  <select
+                    aria-label="Idle gap minutes"
+                    value={capture?.idleGapMinutes ?? 15}
+                    disabled={!settingsReady}
+                    onChange={(event) => void save({ capture: { idleGapMinutes: Number(event.target.value) } })}
+                    className="h-9 rounded-lg border border-border bg-background px-2 text-sm text-foreground disabled:opacity-50"
+                  >
+                    {[5, 10, 15, 30, 60].map((minutes) => (
+                      <option key={minutes} value={minutes}>{minutes} min</option>
+                    ))}
+                  </select>
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {activeSection === "chrome" && (
+            <div className="max-w-xl space-y-6">
+              <div>
+                <h2 className="text-xl font-bold text-foreground mb-1">Chrome Extension</h2>
+                <p className="text-sm text-muted-foreground">Domains the extension is allowed to capture. Changes sync within 60 seconds.</p>
+              </div>
+              <Card className="p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-foreground">Allowed domains</div>
+                    <div className="text-xs text-muted-foreground mt-1">Tabs outside this list are ignored and never stored.</div>
+                  </div>
+                  <Badge color="gray">{allowedDomains.length} domains</Badge>
+                </div>
+                <div className="mt-4 flex gap-2">
+                  <input
+                    value={newDomain}
+                    onChange={(event) => setNewDomain(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") addDomain();
+                    }}
+                    placeholder="example.com"
+                    aria-label="Add allowed domain"
+                    disabled={!settingsReady}
+                    className="flex-1 h-9 rounded-lg border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground disabled:opacity-50"
+                  />
+                  <button
+                    type="button"
+                    onClick={addDomain}
+                    disabled={!settingsReady || newDomain.trim().length === 0}
+                    className="h-9 px-3 rounded-lg border border-border bg-white text-sm font-medium text-foreground hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Add
+                  </button>
+                </div>
+                <div className="mt-3 max-h-64 overflow-y-auto border border-border rounded-xl divide-y divide-border">
+                  {allowedDomains.length === 0 ? (
+                    <div className="px-3 py-4 text-xs text-muted-foreground">No domains configured. The extension keeps its last cached list.</div>
+                  ) : (
+                    allowedDomains.map((domain) => (
+                      <div key={domain} className="flex items-center justify-between gap-3 px-3 py-2">
+                        <span className="text-sm font-mono text-foreground break-all">{domain}</span>
+                        <button
+                          type="button"
+                          onClick={() => removeDomain(domain)}
+                          disabled={!settingsReady}
+                          className="text-xs text-muted-foreground hover:text-red-600 disabled:opacity-50"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => saveDomains([...DEFAULT_ALLOWED_DOMAINS])}
+                  disabled={!settingsReady}
+                  className="mt-3 text-xs font-medium text-primary hover:underline disabled:opacity-50"
+                >
+                  Reset to defaults
+                </button>
+              </Card>
+              <Card className="p-5">
+                <div className="text-sm font-medium text-foreground mb-1">Offline behaviour</div>
+                <div className="text-xs text-muted-foreground">
+                  The extension caches these settings and keeps using the cached copy when the backend is unreachable. Defaults are used only when no cache exists.
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {activeSection === "vscode" && (
+            <div className="max-w-xl space-y-6">
+              <div>
+                <h2 className="text-xl font-bold text-foreground mb-1">VS Code Extension</h2>
+                <p className="text-sm text-muted-foreground">Capture behaviour for the VS Code extension. Changes sync within 60 seconds.</p>
+              </div>
+              <Card className="p-5">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex-1">
+                    <div className="text-sm font-medium text-foreground">Stuck detection threshold</div>
+                    <div className="text-xs text-muted-foreground mt-1">Idle time before a stuck session can be reported.</div>
+                  </div>
+                  <select
+                    aria-label="Stuck detection threshold"
+                    value={settings?.vscode.stuckThresholdMinutes ?? 4}
+                    disabled={!settingsReady}
+                    onChange={(event) => void save({ vscode: { stuckThresholdMinutes: Number(event.target.value) } })}
+                    className="h-9 rounded-lg border border-border bg-background px-2 text-sm text-foreground disabled:opacity-50"
+                  >
+                    {[2, 4, 5, 10, 15].map((minutes) => (
+                      <option key={minutes} value={minutes}>{minutes} min</option>
+                    ))}
+                  </select>
+                </div>
+              </Card>
+              <Card className="p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <div className="text-sm font-medium text-foreground">Redact secrets</div>
+                    <div className="text-xs text-muted-foreground mt-1">Remove tokens, keys, and passwords from captured error and command text.</div>
+                  </div>
+                  <SettingSwitch
+                    label="Redact secrets"
+                    checked={settings?.vscode.redactSecrets ?? true}
+                    disabled={!settingsReady}
+                    onChange={(next) => void save({ vscode: { redactSecrets: next } })}
+                  />
+                </div>
+              </Card>
+              <Card className="p-5">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex-1">
+                    <div className="text-sm font-medium text-foreground">Sync interval</div>
+                    <div className="text-xs text-muted-foreground mt-1">How often buffered events are sent to the backend.</div>
+                  </div>
+                  <select
+                    aria-label="Sync interval"
+                    value={settings?.vscode.syncIntervalSec ?? 10}
+                    disabled={!settingsReady}
+                    onChange={(event) => void save({ vscode: { syncIntervalSec: Number(event.target.value) } })}
+                    className="h-9 rounded-lg border border-border bg-background px-2 text-sm text-foreground disabled:opacity-50"
+                  >
+                    {[5, 10, 30, 60].map((seconds) => (
+                      <option key={seconds} value={seconds}>{seconds} sec</option>
+                    ))}
+                  </select>
+                </div>
+              </Card>
+              <Card className="p-5">
+                <div className="text-sm font-medium text-foreground mb-1">Offline behaviour</div>
+                <div className="text-xs text-muted-foreground">
+                  The extension caches these settings and keeps using the cached copy when the backend is unreachable. Defaults are used only when no cache exists.
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {activeSection === "notifications" && (
+            <div className="max-w-xl space-y-6">
+              <div>
+                <h2 className="text-xl font-bold text-foreground mb-1">Notifications</h2>
+                <p className="text-sm text-muted-foreground">Choose what FlowSync tells you while it is running.</p>
+              </div>
+              <Card className="p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <div className="text-sm font-medium text-foreground">Error toasts</div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Show an in-app toast when a new diagnostic, terminal, or stuck error event arrives.
+                    </div>
+                  </div>
+                  <SettingSwitch
+                    label="Error toasts"
+                    checked={settings?.notifications.errorToasts ?? true}
+                    disabled={!settingsReady}
+                    onChange={(next) => void save({ notifications: { errorToasts: next } })}
+                  />
+                </div>
+              </Card>
+              <Card className="p-5">
+                <div className="text-sm font-medium text-foreground mb-1">How this works</div>
+                <div className="text-xs text-muted-foreground">
+                  Toasts use the live event stream and only fire for real error events. They do not fire for replayed history. If the API key is missing, the live stream is unavailable and no toasts appear.
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {activeSection === "embedding" && (
+            <div className="max-w-xl space-y-6">
+              <div>
+                <h2 className="text-xl font-bold text-foreground mb-1">Embedding Settings</h2>
+                <p className="text-sm text-muted-foreground">Status of the semantic index used for context retrieval.</p>
+              </div>
+              <Card className="p-5">
+                <SettingsRow label="Embedding engine" value="Not configured" />
+                <SettingsRow label="Semantic index" value="Not generated" />
+                <SettingsRow label="Provider" value="None" />
+                <SettingsRow label="Events stored" value={stats ? String(stats.totalEvents) : "—"} />
+              </Card>
+              <Card className="p-5">
+                <div className="text-sm font-medium text-foreground mb-1">No embeddings are generated yet</div>
+                <div className="text-xs text-muted-foreground">
+                  FlowSync currently stores raw events and reconstructs sessions from them. An embedding provider is not required for capture, the timeline, or recovered sessions.
+                </div>
+              </Card>
+              <Card className="p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm text-muted-foreground">Add an embedding provider</div>
+                  <div className="flex items-center gap-2">
+                    <Badge color="gray">Coming soon</Badge>
+                    <button type="button" disabled className="h-9 px-3 rounded-lg border border-border bg-white text-sm font-medium text-foreground opacity-50 cursor-not-allowed">
+                      Configure
+                    </button>
+                  </div>
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {activeSection === "models" && (
+            <div className="max-w-xl space-y-6">
+              <div>
+                <h2 className="text-xl font-bold text-foreground mb-1">AI Models</h2>
+                <p className="text-sm text-muted-foreground">Model providers used for retrieval or generation.</p>
+              </div>
+              <Card className="p-5">
+                <SettingsRow label="Model provider" value="None configured" />
+                <SettingsRow label="Generation" value="Off" />
+                <SettingsRow label="Retrieval" value="Local event history" />
+              </Card>
+              <Card className="p-5">
+                <div className="text-sm font-medium text-foreground mb-1">No AI model is called</div>
+                <div className="text-xs text-muted-foreground">
+                  Recovered sessions are reconstructed from your own stored events. FlowSync does not send activity to a model provider.
+                </div>
+              </Card>
+              <Card className="p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm text-muted-foreground">Add a model provider</div>
+                  <div className="flex items-center gap-2">
+                    <Badge color="gray">Coming soon</Badge>
+                    <button type="button" disabled className="h-9 px-3 rounded-lg border border-border bg-white text-sm font-medium text-foreground opacity-50 cursor-not-allowed">
+                      Add provider
+                    </button>
+                  </div>
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {activeSection === "sync" && (
+            <div className="max-w-xl space-y-6">
+              <div>
+                <h2 className="text-xl font-bold text-foreground mb-1">Cloud Sync</h2>
+                <p className="text-sm text-muted-foreground">Storage location and data controls.</p>
+              </div>
+              <Card className="p-5">
+                <SettingsRow label="Cloud sync" value="Off" />
+                <SettingsRow label="Storage" value="Local SQLite" />
+                <SettingsRow label="Data leaves this device" value="No" />
+                <SettingsRow label="Retention" value={meta ? `${meta.retentionDays} days` : "—"} />
+              </Card>
+              <Card className="p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm text-muted-foreground">Enable cloud sync</div>
+                  <div className="flex items-center gap-2">
+                    <Badge color="gray">Coming soon</Badge>
+                    <button type="button" disabled className="h-9 px-3 rounded-lg border border-border bg-white text-sm font-medium text-foreground opacity-50 cursor-not-allowed">
+                      Enable
+                    </button>
+                  </div>
+                </div>
+              </Card>
+              <Card className="p-5">
+                <div className="text-sm font-medium text-foreground mb-1">Data controls</div>
+                <div className="text-xs text-muted-foreground mb-4">
+                  Retention is set by the backend's RETENTION_DAYS environment variable and cannot be edited here.
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void handleExport()}
+                    className="h-9 px-3 rounded-lg border border-border bg-white text-sm font-medium text-foreground hover:bg-gray-50"
+                  >
+                    Export JSON
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setDeleteStep("confirm"); setDeleteMessage(null); }}
+                    className="h-9 px-3 rounded-lg border border-red-200 bg-red-50 text-sm font-medium text-red-700 hover:bg-red-100"
+                  >
+                    Delete all events
+                  </button>
+                </div>
+                {exportMessage && <div className="mt-3 text-xs text-muted-foreground">{exportMessage}</div>}
+                {deleteStep === "confirm" && (
+                  <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3">
+                    <div className="text-xs text-red-800">
+                      This permanently deletes every stored event. Extensions keep capturing afterwards unless capture is paused.
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setDeleteStep("idle")}
+                        className="h-8 px-3 rounded-lg border border-border bg-white text-xs font-medium text-foreground hover:bg-gray-50"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleDelete()}
+                        disabled={deleting}
+                        className="h-8 px-3 rounded-lg border border-red-300 bg-red-600 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                      >
+                        {deleting ? "Deleting…" : "Delete permanently"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {deleteMessage && <div className="mt-3 text-xs text-muted-foreground">{deleteMessage}</div>}
+              </Card>
             </div>
           )}
 
@@ -1711,20 +2433,25 @@ function SettingsScreen({ navigate }: { navigate: (s: Screen) => void }) {
                     <div className="text-sm font-medium text-foreground">Dark mode</div>
                     <div className="text-xs text-muted-foreground mt-1">Use dark theme in the dashboard.</div>
                   </div>
-                  <button
-                    onClick={() => setDarkMode(!darkMode)}
-                    className={`relative w-11 h-6 rounded-full flex items-center transition-colors before:absolute before:-inset-2.5 before:content-[''] ${darkMode ? "bg-primary justify-end" : "bg-gray-200 justify-start"}`}
-                  >
-                    <div className="w-5 h-5 rounded-full bg-white shadow mx-0.5" />
-                  </button>
+                  <SettingSwitch
+                    label="Dark mode"
+                    checked={darkMode}
+                    onChange={setDarkMode}
+                  />
                 </div>
               </Card>
               <Card className="p-5">
                 <div className="text-sm font-medium text-foreground mb-3">Font size</div>
                 <div className="flex gap-2">
-                  {["Small", "Medium", "Large"].map((size) => (
-                    <button key={size} className={`flex-1 py-2 min-h-11 sm:min-h-0 rounded-xl text-sm border transition-colors ${size === "Medium" ? "border-primary bg-blue-50 text-primary font-medium" : "border-border text-muted-foreground hover:border-gray-300"}`}>
-                      {size}
+                  {(["small", "medium", "large"] as const).map((size) => (
+                    <button
+                      key={size}
+                      type="button"
+                      onClick={() => setFontSize(size)}
+                      aria-pressed={fontSize === size}
+                      className={`flex-1 py-2 min-h-11 sm:min-h-0 rounded-xl text-sm border transition-colors ${fontSize === size ? "border-primary bg-blue-50 text-primary font-medium" : "border-border text-muted-foreground hover:border-gray-300"}`}
+                    >
+                      {size.charAt(0).toUpperCase() + size.slice(1)}
                     </button>
                   ))}
                 </div>
@@ -1736,14 +2463,15 @@ function SettingsScreen({ navigate }: { navigate: (s: Screen) => void }) {
             <div className="max-w-xl space-y-6">
               <div>
                 <h2 className="text-xl font-bold text-foreground mb-1">Keyboard Shortcuts</h2>
-                <p className="text-sm text-muted-foreground">All FlowSync shortcuts. Click to customize.</p>
+                <p className="text-sm text-muted-foreground">Reference only — these shortcuts are not bound in FlowSync yet.</p>
               </div>
               <Card className="overflow-hidden">
                 <div className="divide-y divide-border">
                   {shortcuts.map((s) => (
-                    <div key={s.action} className="px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-0 sm:justify-between hover:bg-gray-50 cursor-pointer group">
+                    <div key={s.action} className="px-4 sm:px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-0 sm:justify-between">
                       <div className="text-sm text-foreground">{s.action}</div>
-                      <div className="flex items-center gap-1 flex-wrap">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs text-muted-foreground">Not bound</span>
                         {s.keys.map((k, i) => (
                           <span key={i} className="text-xs font-mono bg-gray-100 border border-gray-200 text-foreground px-2 py-1 rounded-lg">{k}</span>
                         ))}
@@ -1751,19 +2479,6 @@ function SettingsScreen({ navigate }: { navigate: (s: Screen) => void }) {
                     </div>
                   ))}
                 </div>
-              </Card>
-            </div>
-          )}
-
-          {!["capture", "appearance", "shortcuts"].includes(activeSection) && (
-            <div className="max-w-xl">
-              <div>
-                <h2 className="text-xl font-bold text-foreground mb-1">{sections.find(s => s.id === activeSection)?.label}</h2>
-                <p className="text-sm text-muted-foreground mb-6">Configure this section to match your workflow.</p>
-              </div>
-              <Card className="p-8 text-center">
-                <div className="text-4xl mb-3">⚙️</div>
-                <div className="text-sm text-muted-foreground">Settings for this section are coming in the next release.</div>
               </Card>
             </div>
           )}
@@ -1917,6 +2632,91 @@ function ArchitectureScreen({ navigate }: { navigate: (s: Screen) => void }) {
   );
 }
 
+// ─── NOTIFICATIONS ───────────────────────────────────────────────────────────
+
+function NotificationBridge({ active }: { active: boolean }) {
+  const [enabled, setEnabled] = useState(false);
+  const enabledRef = useRef(enabled);
+
+  useEffect(() => {
+    enabledRef.current = enabled;
+  }, [enabled]);
+
+  useEffect(() => {
+    let disposed = false;
+    const load = () => {
+      void fetchSettings()
+        .then((next) => {
+          if (!disposed) setEnabled(next.notifications.errorToasts);
+        })
+        .catch(() => {
+          // Keep the last known value when the backend is unavailable.
+        });
+    };
+    load();
+    const timer = setInterval(load, 60_000);
+    const onUpdate = (event: Event) => {
+      const detail = (event as CustomEvent<FlowSyncSettings>).detail;
+      if (detail?.notifications) setEnabled(detail.notifications.errorToasts);
+    };
+    window.addEventListener("flowsync:settings-updated", onUpdate);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+      window.removeEventListener("flowsync:settings-updated", onUpdate);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!active || !enabled) return;
+    const handle = connectEvents(
+      () => {},
+      (event) => {
+        if (!enabledRef.current) return;
+        if (!["diagnostic.error", "terminal.error", "developer.stuck"].includes(event.type)) return;
+        const title =
+          event.type === "developer.stuck"
+            ? "FlowSync detected a stuck session"
+            : "FlowSync captured an error";
+        const description =
+          event.payload.errorMessage ||
+          event.payload.command ||
+          event.payload.fileName ||
+          "Open Live Capture for details.";
+        toast.error(title, { description: description.slice(0, 180) });
+      },
+      () => {},
+    );
+    return () => handle.close();
+  }, [active, enabled]);
+
+  return null;
+}
+
+function ThemedToaster() {
+  const [dark, setDark] = useState(() =>
+    typeof document !== "undefined" && document.documentElement.classList.contains("dark"),
+  );
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const sync = () => setDark(root.classList.contains("dark"));
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(root, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <Toaster
+      position="bottom-right"
+      richColors
+      closeButton
+      theme={dark ? "dark" : "light"}
+    />
+  );
+}
+
 // ─── ROOT ─────────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -1926,6 +2726,8 @@ export default function App() {
 
   return (
     <div style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }} className="size-full">
+      <NotificationBridge active={screen !== "landing"} />
+      <ThemedToaster />
       {screen === "landing" && <LandingScreen navigate={navigate} />}
       {screen === "dashboard" && <DashboardScreen navigate={navigate} />}
       {screen === "capture" && <CaptureScreen navigate={navigate} />}

@@ -37,6 +37,7 @@ exports.activate = activate;
 exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
 const client_1 = require("./api/client");
+const settings_1 = require("./settings");
 const panel_1 = require("./panel");
 const EVENT_TYPES = {
     FILE_OPENED: "file.opened",
@@ -65,11 +66,11 @@ function redactSecrets(text) {
         .replace(/\b[A-Fa-f0-9]{32,}\b/g, "[REDACTED]")
         .replace(/\b[A-Za-z0-9_-]{32,}\b/g, "[REDACTED]");
 }
-function trimErrorText(text) {
-    const redacted = redactSecrets(text).trim();
-    if (redacted.length <= 500)
-        return redacted;
-    return `…${redacted.slice(-500)}`;
+function trimErrorText(text, redact) {
+    const cleaned = (redact ? redactSecrets(text) : text).trim();
+    if (cleaned.length <= 500)
+        return cleaned;
+    return `…${cleaned.slice(-500)}`;
 }
 function commandFailed(exitCode, output) {
     if (typeof exitCode === "number" && exitCode !== 0)
@@ -84,6 +85,9 @@ function activate(context) {
     let socket = null;
     let syncTimer = null;
     let idleTimer = null;
+    let settingsTimer = null;
+    let currentSettings = settings_1.DEFAULT_SETTINGS;
+    let redactEnabled = settings_1.DEFAULT_SETTINGS.vscode.redactSecrets;
     function reloadConfig() {
         const config = vscode.workspace.getConfiguration("flowsync");
         (0, client_1.configureClient)({
@@ -91,10 +95,42 @@ function activate(context) {
             authToken: config.get("apiKey", ""),
         });
     }
+    // Pause always wins. Terminal errors additionally need both error capture
+    // and terminal capture; diagnostics and stuck sessions only need error
+    // capture. Non-error activity (file opens, context switches) has no toggle
+    // of its own and is controlled by Pause alone.
+    function captureAllowed(eventType) {
+        const capture = currentSettings.capture;
+        if (capture.paused)
+            return false;
+        if (eventType === EVENT_TYPES.TERMINAL_ERROR) {
+            return capture.autoCaptureErrors && capture.terminalCommands;
+        }
+        if (eventType === EVENT_TYPES.DIAGNOSTIC_ERROR ||
+            eventType === EVENT_TYPES.DEVELOPER_STUCK) {
+            return capture.autoCaptureErrors;
+        }
+        return true;
+    }
+    function applySettings(next) {
+        const intervalChanged = next.vscode.syncIntervalSec !== currentSettings.vscode.syncIntervalSec;
+        currentSettings = next;
+        redactEnabled = next.vscode.redactSecrets;
+        if (intervalChanged || !syncTimer)
+            restartSyncTimer();
+    }
+    async function loadSettings() {
+        // Apply the cached copy first so an offline start keeps the last synced
+        // policy, then replace it with the backend copy when it is reachable.
+        applySettings(await (0, settings_1.getCachedSettings)(context));
+        applySettings(await (0, settings_1.refreshSettings)(context));
+    }
     function getProject() {
         return vscode.workspace.workspaceFolders?.[0]?.name || DEFAULT_PROJECT;
     }
     function push(eventType, payload) {
+        if (!captureAllowed(eventType))
+            return;
         buffer.push({
             id: (0, client_1.uuid)(),
             type: eventType,
@@ -122,11 +158,17 @@ function activate(context) {
     function startSyncTimer() {
         if (syncTimer)
             return;
-        const config = vscode.workspace.getConfiguration("flowsync");
-        const intervalSec = Math.max(5, config.get("syncIntervalSec", 10));
+        const intervalSec = Math.max(5, currentSettings.vscode.syncIntervalSec);
         syncTimer = setInterval(() => {
             void flush();
         }, intervalSec * 1000);
+    }
+    function restartSyncTimer() {
+        if (syncTimer) {
+            clearInterval(syncTimer);
+            syncTimer = null;
+        }
+        startSyncTimer();
     }
     function openSocket() {
         if (socket)
@@ -220,12 +262,13 @@ function activate(context) {
         });
         if (!emit)
             return;
+        const rawMessage = first.message.length > 500
+            ? `${first.message.slice(0, 500)}…`
+            : first.message;
         push(EVENT_TYPES.DIAGNOSTIC_ERROR, {
             fileName: vscode.workspace.asRelativePath(uri),
             language: uri.path.split(".").pop() ?? undefined,
-            errorMessage: first.message.length > 500
-                ? `${first.message.slice(0, 500)}…`
-                : first.message,
+            errorMessage: redactEnabled ? redactSecrets(rawMessage) : rawMessage,
             severity: "error",
         });
         void flush();
@@ -240,10 +283,12 @@ function activate(context) {
         }
     });
     // --- Stuck detection: only focused + real unresolved/failed evidence ---
-    const idleThresholdMs = 4 * 60 * 1000;
     const failureWindowMs = 15 * 60 * 1000;
     let lastActivityAt = Date.now();
     let stuckReported = false;
+    function idleThresholdMs() {
+        return Math.max(1, currentSettings.vscode.stuckThresholdMinutes) * 60 * 1000;
+    }
     function markActivity() {
         lastActivityAt = Date.now();
         stuckReported = false;
@@ -255,7 +300,7 @@ function activate(context) {
         const now = Date.now();
         if (stuckReported)
             return;
-        if (now - lastActivityAt < idleThresholdMs)
+        if (now - lastActivityAt < idleThresholdMs())
             return;
         if (!vscode.window.state.focused)
             return;
@@ -271,7 +316,7 @@ function activate(context) {
             (failure ? `Command failed: ${failure.command}` : "");
         push(EVENT_TYPES.DEVELOPER_STUCK, {
             stuckDuration: now - lastActivityAt,
-            errorMessage: reason ? trimErrorText(reason) : undefined,
+            errorMessage: reason ? trimErrorText(reason, redactEnabled) : undefined,
             fileName: diagnostic?.fileName,
             command: failure?.command,
         });
@@ -313,11 +358,11 @@ function activate(context) {
                 const text = output.trim();
                 if (!commandFailed(exitCode, text))
                     return;
-                const commandText = redactSecrets(command).slice(0, 300);
+                const commandText = (redactEnabled ? redactSecrets(command) : command).slice(0, 300);
                 const errorText = trimErrorText(text ||
                     (typeof exitCode === "number"
                         ? `Command exited with code ${exitCode}`
-                        : "Command failed"));
+                        : "Command failed"), redactEnabled);
                 recentFailure = { at: Date.now(), command: commandText, output: errorText };
                 push(EVENT_TYPES.TERMINAL_ERROR, {
                     command: commandText,
@@ -333,6 +378,10 @@ function activate(context) {
     startSyncTimer();
     openSocket();
     void flush();
+    void loadSettings();
+    settingsTimer = setInterval(() => {
+        void loadSettings();
+    }, 60000);
     // --- Commands / subscriptions ---
     context.subscriptions.push(vscode.commands.registerCommand("flowsync.showPanel", showPanel), vscode.commands.registerCommand("flowsync.showOutput", async () => {
         const message = buffer.length === 0
@@ -343,9 +392,11 @@ function activate(context) {
         if (change.affectsConfiguration("flowsync")) {
             reloadConfig();
             openSocket();
+            void loadSettings();
         }
     }), { dispose: () => { if (idleTimer)
-            clearInterval(idleTimer); } }, { dispose: () => { if (syncTimer)
+            clearInterval(idleTimer); } }, { dispose: () => { if (settingsTimer)
+            clearInterval(settingsTimer); } }, { dispose: () => { if (syncTimer)
             clearInterval(syncTimer); } }, { dispose: () => socket?.close() }, { dispose: () => panel?.dispose() });
     void vscode.window.showInformationMessage("FlowSync is capturing activity.");
 }

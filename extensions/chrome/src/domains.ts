@@ -184,6 +184,22 @@ export async function resetToDefaults(): Promise<string[]> {
   return defaults;
 }
 
+// Apply the list synced from the backend without disturbing the version
+// bookkeeping used for default-list migrations.
+export async function setAllowedDomains(domains: string[]): Promise<void> {
+  const normalized = domains.map(normalizeDomain).filter(Boolean);
+  if (normalized.length === 0) return;
+  const current = await readAllowed();
+  const unchanged =
+    current.length === normalized.length &&
+    current.every((domain, index) => domain === normalized[index]);
+  if (unchanged) return;
+  await chrome.storage.local.set({
+    [ALLOWED_KEY]: normalized,
+    [DEFAULTS_VERSION_KEY]: DEFAULTS_VERSION,
+  });
+}
+
 export async function isDomainAllowed(url: string): Promise<boolean> {
   let hostname: string;
   try {

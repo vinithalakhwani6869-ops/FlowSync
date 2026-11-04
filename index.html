@@ -8,6 +8,21 @@
       <meta name="description" content="Streamline team collaboration and project management with an intuitive platform designed for businesses to enhance productivity and communication." />
       <meta name="robots" content="noindex, nofollow" />
       <style>html, body { height: 100%; margin: 0; } #root { height: 100%; }</style>
+      <script>
+        // Apply saved appearance before the first paint so a dark-mode reload
+        // never flashes the light theme.
+        (function () {
+          try {
+            var theme = localStorage.getItem("flowsync:theme");
+            if (theme === "dark") document.documentElement.classList.add("dark");
+            var size = localStorage.getItem("flowsync:font-size");
+            var px = size === "small" ? "14px" : size === "large" ? "18px" : "16px";
+            document.documentElement.style.setProperty("--font-size", px);
+          } catch (error) {
+            // localStorage can be unavailable (private mode / blocked storage).
+          }
+        })();
+      </script>
       
     </head>
 

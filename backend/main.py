@@ -14,7 +14,9 @@ import database
 app = FastAPI(title="FlowSync API", version="0.1.0")
 
 from routes.events import router
+from routes.settings import router as settings_router
 app.include_router(router)
+app.include_router(settings_router)
 
 
 # A local backend/.env file is loaded first if present (real env vars always win).

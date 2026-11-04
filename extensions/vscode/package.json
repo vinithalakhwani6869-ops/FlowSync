@@ -43,7 +43,8 @@
         "flowsync.syncIntervalSec": {
           "type": "number",
           "default": 10,
-          "description": "How often buffered events are flushed to the backend (seconds)."
+          "description": "Deprecated. FlowSync Settings > VS Code Extension now controls the sync interval when the backend is reachable.",
+          "deprecationMessage": "Set the sync interval in FlowSync Settings > VS Code Extension instead."
         }
       }
     }

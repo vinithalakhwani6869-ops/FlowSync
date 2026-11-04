@@ -46,40 +46,47 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.145 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.145 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.985 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.396 0.141 25.723);
-  --destructive-foreground: oklch(0.637 0.237 25.331);
-  --border: oklch(0.269 0 0);
-  --input: oklch(0.269 0 0);
-  --ring: oklch(0.439 0 0);
+  color-scheme: dark;
+  --background: #0b0f17;
+  --foreground: #e5e7eb;
+  --card: #121826;
+  --card-foreground: #e5e7eb;
+  --popover: #121826;
+  --popover-foreground: #e5e7eb;
+  --primary: #3b82f6;
+  --primary-foreground: #ffffff;
+  --secondary: #1b2433;
+  --secondary-foreground: #e5e7eb;
+  --muted: #1b2433;
+  --muted-foreground: #9aa4b2;
+  --accent: #1b2433;
+  --accent-foreground: #e5e7eb;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --border: #263041;
+  --input: #263041;
+  --input-background: #0f1522;
+  --switch-background: #3b4657;
+  --ring: #60a5fa;
   --font-weight-medium: 500;
   --font-weight-normal: 400;
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.269 0 0);
-  --sidebar-ring: oklch(0.439 0 0);
+  --chart-1: #60a5fa;
+  --chart-2: #34d399;
+  --chart-3: #fbbf24;
+  --chart-4: #a78bfa;
+  --chart-5: #f87171;
+  --sidebar: #0e1420;
+  --sidebar-foreground: #e5e7eb;
+  --sidebar-primary: #3b82f6;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #1b2433;
+  --sidebar-accent-foreground: #e5e7eb;
+  --sidebar-border: #263041;
+  --sidebar-ring: #60a5fa;
+  --fs-success: #34d399;
+  --fs-warning: #fbbf24;
+  --fs-blue: #60a5fa;
+  --fs-blue-light: #93c5fd;
 }
 
 @theme inline {
@@ -185,4 +192,123 @@
     font-weight: var(--font-weight-normal);
     line-height: 1.5;
   }
+}
+
+/* ─── Dark-mode compatibility ────────────────────────────────────────────────
+   The app still contains literal light Tailwind colors (bg-white, bg-gray-*,
+   pastel chips, etc.). These rules only apply while `.dark` is on <html>, so
+   the light theme is untouched. They are intentionally unlayered so they win
+   over Tailwind's utility layer. */
+.dark .bg-white {
+  background-color: var(--card);
+}
+.dark .bg-white\/80 {
+  background-color: color-mix(in oklab, var(--card) 80%, transparent);
+}
+.dark .bg-gray-50,
+.dark .bg-gray-50\/70,
+.dark .bg-gray-100 {
+  background-color: var(--muted);
+}
+.dark .bg-gray-200 {
+  background-color: var(--switch-background);
+}
+.dark .bg-gray-400 {
+  background-color: #4b5563;
+}
+.dark .bg-blue-50,
+.dark .bg-blue-100 {
+  background-color: rgba(59, 130, 246, 0.16);
+}
+.dark .bg-emerald-50,
+.dark .bg-emerald-100 {
+  background-color: rgba(16, 185, 129, 0.16);
+}
+.dark .bg-amber-50,
+.dark .bg-amber-100 {
+  background-color: rgba(245, 158, 11, 0.16);
+}
+.dark .bg-violet-50,
+.dark .bg-violet-100 {
+  background-color: rgba(139, 92, 246, 0.16);
+}
+.dark .bg-red-100 {
+  background-color: rgba(239, 68, 68, 0.16);
+}
+
+.dark .hover\:bg-gray-50:hover,
+.dark .hover\:bg-gray-100:hover {
+  background-color: var(--muted);
+}
+.dark .hover\:bg-blue-50:hover {
+  background-color: rgba(59, 130, 246, 0.22);
+}
+.dark .hover\:bg-blue-100:hover {
+  background-color: rgba(59, 130, 246, 0.28);
+}
+.dark .hover\:bg-blue-600:hover {
+  background-color: #2563eb;
+}
+.dark .hover\:bg-blue-700:hover {
+  background-color: #1d4ed8;
+}
+.dark .hover\:bg-\[\#2d2d3e\]:hover {
+  background-color: #2d2d3e;
+}
+
+.dark .border-gray-200,
+.dark .border-gray-300,
+.dark .border-blue-100,
+.dark .border-blue-200,
+.dark .border-emerald-200,
+.dark .border-amber-200,
+.dark .border-violet-200,
+.dark .border-red-200 {
+  border-color: var(--border);
+}
+.dark .hover\:border-gray-300:hover {
+  border-color: #4b5563;
+}
+
+.dark .text-gray-400,
+.dark .text-gray-500,
+.dark .text-gray-600 {
+  color: var(--muted-foreground);
+}
+.dark .text-gray-700,
+.dark .text-gray-800,
+.dark .text-gray-900 {
+  color: var(--foreground);
+}
+.dark .text-blue-600,
+.dark .text-blue-700,
+.dark .text-blue-800 {
+  color: #93c5fd;
+}
+.dark .text-emerald-600,
+.dark .text-emerald-700,
+.dark .text-emerald-800 {
+  color: #6ee7b7;
+}
+.dark .text-amber-600,
+.dark .text-amber-700,
+.dark .text-amber-800 {
+  color: #fcd34d;
+}
+.dark .text-violet-600,
+.dark .text-violet-700,
+.dark .text-violet-800 {
+  color: #c4b5fd;
+}
+.dark .text-red-600,
+.dark .text-red-700,
+.dark .text-red-800 {
+  color: #fca5a5;
+}
+
+.dark .shadow-blue-200 {
+  --tw-shadow-color: rgba(37, 99, 235, 0.35);
+}
+.dark .shadow-gray-200 {
+  --tw-shadow-color: rgba(0, 0, 0, 0.6);
 }

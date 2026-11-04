@@ -2,9 +2,11 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.configureClient = configureClient;
 exports.uuid = uuid;
+exports.fetchSettings = fetchSettings;
 exports.postEvents = postEvents;
 exports.connectSocket = connectSocket;
 const EVENT_PATH = "/api/v1/events";
+const SETTINGS_PATH = "/api/v1/settings";
 const MAX_ATTEMPTS = 5;
 const BASE_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 15000;
@@ -39,6 +41,19 @@ async function fetchWithTimeout(url, init, timeoutMs) {
     finally {
         clearTimeout(timer);
     }
+}
+async function fetchSettings() {
+    if (!config.authToken)
+        throw new Error("No API key configured");
+    const response = await fetchWithTimeout(`${config.baseUrl}${SETTINGS_PATH}`, {
+        headers: {
+            accept: "application/json",
+            authorization: `Bearer ${config.authToken}`,
+        },
+    }, REQUEST_TIMEOUT_MS);
+    if (!response.ok)
+        throw new Error(`Settings request failed: HTTP ${response.status}`);
+    return (await response.json());
 }
 async function postEvents(events) {
     if (events.length === 0)

@@ -1,10 +1,12 @@
 import { configureClient, postEvents, uuid } from "./api/client";
-import type { FlowSyncEvent } from "./api/client";
+import type { FlowSyncEvent, FlowSyncSettings } from "./api/client";
 import { ackSynced, getBuffer, nextVisitCount, pushEvent } from "./storage";
 import { isDomainAllowed } from "./domains";
+import { getCachedSettings, refreshSettings } from "./settings";
 
 const PROJECT_ID = "default";
 const FLUSH_DELAY_MS = 1500;
+const SETTINGS_ALARM = "flowsync:settings-refresh";
 
 interface TabState {
   url: string;
@@ -17,6 +19,28 @@ const tabs = new Map<number, TabState>();
 let lastActiveTabId: number | null = null;
 let flushing = false;
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
+let cachedSettings: FlowSyncSettings | null = null;
+let initPromise: Promise<void> | null = null;
+
+function tabsCaptureEnabled(): boolean {
+  return Boolean(
+    cachedSettings &&
+      !cachedSettings.capture.paused &&
+      cachedSettings.capture.browserTabs,
+  );
+}
+
+function applySettings(next: FlowSyncSettings): void {
+  cachedSettings = next;
+  if (!tabsCaptureEnabled()) {
+    // Drop open dwell state without emitting: capture is paused or off.
+    tabs.clear();
+  }
+}
+
+function ensureAlarm(): void {
+  chrome.alarms.create(SETTINGS_ALARM, { periodInMinutes: 1 });
+}
 
 function isTrackableUrl(raw?: string): raw is string {
   if (!raw) return false;
@@ -40,19 +64,21 @@ function emitEvent(event: FlowSyncEvent): void {
 
 async function closeDwell(state: TabState, now: number): Promise<void> {
   const dwellTime = Math.max(0, now - state.lastSeen);
-  emitEvent({
-    id: uuid(),
-    type: "tab.dwell",
-    project: PROJECT_ID,
-    ts: now,
-    source: "chrome",
-    payload: {
-      url: state.url,
-      title: state.title,
-      dwellTime,
-      visitCount: state.visitCount,
-    },
-  });
+  if (tabsCaptureEnabled()) {
+    emitEvent({
+      id: uuid(),
+      type: "tab.dwell",
+      project: PROJECT_ID,
+      ts: now,
+      source: "chrome",
+      payload: {
+        url: state.url,
+        title: state.title,
+        dwellTime,
+        visitCount: state.visitCount,
+      },
+    });
+  }
   state.lastSeen = 0;
 }
 
@@ -63,6 +89,10 @@ async function ensureTracked(
   now: number,
   emitVisit: boolean,
 ): Promise<void> {
+  if (!tabsCaptureEnabled()) {
+    tabs.delete(tabId);
+    return;
+  }
   const prev = tabs.get(tabId);
   if (prev && prev.lastSeen > 0 && prev.url !== url) {
     await closeDwell(prev, now);
@@ -94,6 +124,13 @@ async function ensureTracked(
 }
 
 async function handleActivated(tabId: number): Promise<void> {
+  await ensureInit();
+  if (!tabsCaptureEnabled()) {
+    tabs.clear();
+    lastActiveTabId = tabId;
+    return;
+  }
+
   const now = Date.now();
 
   if (lastActiveTabId !== null && lastActiveTabId !== tabId) {
@@ -123,6 +160,12 @@ async function handleActivated(tabId: number): Promise<void> {
 }
 
 async function handleUpdated(tabId: number): Promise<void> {
+  await ensureInit();
+  if (!tabsCaptureEnabled()) {
+    tabs.delete(tabId);
+    return;
+  }
+
   const info = await safeGetTab(tabId);
   if (!info || !isTrackableUrl(info.url)) return;
 
@@ -183,8 +226,22 @@ async function init(): Promise<void> {
   if (typeof baseUrl === "string" && baseUrl.length > 0) configureClient({ baseUrl });
   if (typeof authToken === "string" && authToken.length > 0) configureClient({ authToken });
 
+  applySettings(await refreshSettings());
+  ensureAlarm();
+
   const pending = await getBuffer();
   if (pending.length > 0) void flushBuffer();
+}
+
+function ensureInit(): Promise<void> {
+  if (!initPromise) {
+    initPromise = init().catch((error) => {
+      console.warn(`[flowsync] Initialisation failed: ${String(error)}`);
+      // Allow a later event to retry after a transient storage/network failure.
+      initPromise = null;
+    });
+  }
+  return initPromise;
 }
 
 chrome.tabs.onActivated.addListener(({ tabId }) => {
@@ -197,18 +254,32 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 
 chrome.runtime.onInstalled.addListener(() => {
-  emitEvent({
-    id: uuid(),
-    type: "session.start",
-    project: PROJECT_ID,
-    ts: Date.now(),
-    source: "chrome",
-    payload: {},
-  });
+  void (async () => {
+    await ensureInit();
+    await applySettings(await refreshSettings());
+    if (tabsCaptureEnabled()) {
+      emitEvent({
+        id: uuid(),
+        type: "session.start",
+        project: PROJECT_ID,
+        ts: Date.now(),
+        source: "chrome",
+        payload: {},
+      });
+    }
+  })();
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  void flushBuffer();
+  void ensureInit();
 });
 
-void init();
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== SETTINGS_ALARM) return;
+  void (async () => {
+    await ensureInit();
+    applySettings(await refreshSettings());
+  })();
+});
+
+void ensureInit();

@@ -5,7 +5,8 @@
   "description": "Watches what happens in the gaps between your tools. Captures browsing activity for FlowSync debugging timelines, silently and locally-first.",
   "permissions": [
     "tabs",
-    "storage"
+    "storage",
+    "alarms"
   ],
   "host_permissions": [
     "http://localhost/*",

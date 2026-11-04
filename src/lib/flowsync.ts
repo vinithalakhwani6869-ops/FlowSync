@@ -33,6 +33,41 @@ export interface FlowSyncStats {
   lastTs: number | null;
 }
 
+export interface FlowSyncSettings {
+  capture: {
+    paused: boolean;
+    autoCaptureErrors: boolean;
+    terminalCommands: boolean;
+    browserTabs: boolean;
+    personalNotes: boolean;
+    idleGapMinutes: number;
+  };
+  notifications: {
+    errorToasts: boolean;
+  };
+  chrome: {
+    allowedDomains: string[];
+  };
+  vscode: {
+    stuckThresholdMinutes: number;
+    redactSecrets: boolean;
+    syncIntervalSec: number;
+  };
+}
+
+export type SettingsPatch = {
+  [K in keyof FlowSyncSettings]?: Partial<FlowSyncSettings[K]>;
+};
+
+export interface FlowSyncMeta {
+  retentionDays: number;
+}
+
+export interface FlowSyncExport {
+  exportedAt: number;
+  events: FlowSyncEvent[];
+}
+
 interface WsInitMessage {
   type: "init";
   events: FlowSyncEvent[];
@@ -64,6 +99,60 @@ export async function fetchEvents(
 
 export async function fetchStats(): Promise<FlowSyncStats> {
   return getJson<FlowSyncStats>("/api/v1/events/stats");
+}
+
+function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    accept: "application/json",
+    "content-type": "application/json",
+  };
+  const key = getApiKey();
+  if (key) headers.authorization = `Bearer ${key}`;
+  return headers;
+}
+
+async function authJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(path, { ...init, headers: authHeaders() });
+  if (!response.ok) {
+    throw new Error(`${init?.method ?? "GET"} ${path} failed: HTTP ${response.status}`);
+  }
+  return (await response.json()) as T;
+}
+
+export async function fetchSettings(): Promise<FlowSyncSettings> {
+  return authJson<FlowSyncSettings>("/api/v1/settings");
+}
+
+export async function updateSettings(patch: SettingsPatch): Promise<FlowSyncSettings> {
+  return authJson<FlowSyncSettings>("/api/v1/settings", {
+    method: "PUT",
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function fetchMeta(): Promise<FlowSyncMeta> {
+  return authJson<FlowSyncMeta>("/api/v1/meta");
+}
+
+export async function exportData(): Promise<FlowSyncExport> {
+  return authJson<FlowSyncExport>("/api/v1/export");
+}
+
+export async function deleteAllData(): Promise<number> {
+  const body = await authJson<{ deleted: number }>("/api/v1/data", { method: "DELETE" });
+  return body.deleted;
+}
+
+export function downloadJson(data: unknown, filename: string): void {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 export interface LiveEventsHandle {

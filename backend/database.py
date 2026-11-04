@@ -8,6 +8,152 @@ from typing import Any, Optional
 DB_DIR = Path(os.environ.get("FLOWSYNC_DB_DIR", str(Path(__file__).resolve().parent / "data")))
 DB_PATH = DB_DIR / "flowsync.db"
 
+SETTINGS_ROW_KEY = "app"
+
+# Keep this list in sync with extensions/chrome/src/domains.ts. These are the
+# same defaults the extension already seeds on a fresh install.
+DEFAULT_ALLOWED_DOMAINS = [
+    "github.com",
+    "gitlab.com",
+    "bitbucket.org",
+    "stackoverflow.com",
+    "npmjs.com",
+    "pypi.org",
+    "docs.python.org",
+    "developer.mozilla.org",
+    "localhost",
+    "127.0.0.1",
+    "vercel.app",
+    "railway.app",
+    "supabase.com",
+    "tailwindcss.com",
+    "reactjs.org",
+    "react.dev",
+    "nextjs.org",
+    "vitejs.dev",
+    "fastapi.tiangolo.com",
+    "devdocs.io",
+    "caniuse.com",
+    "regex101.com",
+    "codepen.io",
+    "codesandbox.io",
+    "replit.com",
+    "render.com",
+    "heroku.com",
+    "digitalocean.com",
+    "aws.amazon.com",
+    "console.cloud.google.com",
+    "portal.azure.com",
+    "leetcode.com",
+    "codeforces.com",
+    "codechef.com",
+    "hackerrank.com",
+    "geeksforgeeks.org",
+    "kaggle.com",
+    "huggingface.co",
+    "colab.research.google.com",
+]
+
+DEFAULT_SETTINGS: dict[str, Any] = {
+    "capture": {
+        "paused": False,
+        "autoCaptureErrors": True,
+        "terminalCommands": True,
+        "browserTabs": True,
+        "personalNotes": False,
+        "idleGapMinutes": 15,
+    },
+    "notifications": {
+        "errorToasts": True,
+    },
+    "chrome": {
+        "allowedDomains": list(DEFAULT_ALLOWED_DOMAINS),
+    },
+    "vscode": {
+        "stuckThresholdMinutes": 4,
+        "redactSecrets": True,
+        "syncIntervalSec": 10,
+    },
+}
+
+
+def _copy(value: Any) -> Any:
+    return json.loads(json.dumps(value))
+
+
+def _merge_known(defaults: dict[str, Any], current: Any, patch: Any) -> dict[str, Any]:
+    """Deep-merge only keys that exist in the defaults schema.
+
+    Unknown keys are ignored so the stored blob cannot grow into an
+    arbitrary document over time.
+    """
+    result = _copy(current) if isinstance(current, dict) else _copy(defaults)
+    if not isinstance(patch, dict):
+        return result
+    for key, value in patch.items():
+        if key not in defaults:
+            continue
+        default_value = defaults[key]
+        if isinstance(default_value, dict):
+            child = result.get(key)
+            if not isinstance(child, dict):
+                child = _copy(default_value)
+            result[key] = _merge_known(default_value, child, value)
+        else:
+            result[key] = value
+    return result
+
+
+def _as_bool(value: Any, fallback: bool) -> bool:
+    return value if isinstance(value, bool) else fallback
+
+
+def _as_int(value: Any, fallback: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return max(minimum, min(maximum, parsed))
+
+
+def _normalize_domain(domain: str) -> str:
+    return domain.strip().lower().lstrip(".").rstrip("/")
+
+
+def _sanitize_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    result = _merge_known(DEFAULT_SETTINGS, DEFAULT_SETTINGS, settings)
+    capture = result["capture"]
+    capture["paused"] = _as_bool(capture.get("paused"), False)
+    capture["autoCaptureErrors"] = _as_bool(capture.get("autoCaptureErrors"), True)
+    capture["terminalCommands"] = _as_bool(capture.get("terminalCommands"), True)
+    capture["browserTabs"] = _as_bool(capture.get("browserTabs"), True)
+    capture["personalNotes"] = _as_bool(capture.get("personalNotes"), False)
+    capture["idleGapMinutes"] = _as_int(capture.get("idleGapMinutes"), 15, 1, 240)
+
+    notifications = result["notifications"]
+    notifications["errorToasts"] = _as_bool(notifications.get("errorToasts"), True)
+
+    chrome = result["chrome"]
+    raw_domains = chrome.get("allowedDomains")
+    if isinstance(raw_domains, list):
+        cleaned: list[str] = []
+        for value in raw_domains:
+            if not isinstance(value, str):
+                continue
+            normalized = _normalize_domain(value)
+            if normalized and normalized not in cleaned:
+                cleaned.append(normalized)
+        chrome["allowedDomains"] = cleaned
+    else:
+        chrome["allowedDomains"] = list(DEFAULT_ALLOWED_DOMAINS)
+
+    vscode = result["vscode"]
+    vscode["stuckThresholdMinutes"] = _as_int(vscode.get("stuckThresholdMinutes"), 4, 1, 60)
+    vscode["redactSecrets"] = _as_bool(vscode.get("redactSecrets"), True)
+    vscode["syncIntervalSec"] = _as_int(vscode.get("syncIntervalSec"), 10, 5, 300)
+
+    return result
+
 
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=30)
@@ -36,6 +182,14 @@ def init_db() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_events_project ON events(project)")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_events_fingerprint ON events(type, project, source, ts)"
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
         )
 
 
@@ -129,6 +283,57 @@ def delete_events_older_than(days: int) -> int:
     with _connect() as conn:
         cursor = conn.execute("DELETE FROM events WHERE ts < ?", (cutoff_ms,))
         return cursor.rowcount if cursor.rowcount is not None else 0
+
+
+def export_events() -> list[dict[str, Any]]:
+    """Return every stored event, newest first, for a full JSON export."""
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, type, project, source, ts, payload FROM events ORDER BY ts DESC"
+        ).fetchall()
+    return [_row_to_event(row) for row in rows]
+
+
+def delete_all_events() -> int:
+    """Delete every stored event and return the number of rows removed."""
+    init_db()
+    with _connect() as conn:
+        cursor = conn.execute("DELETE FROM events")
+        return cursor.rowcount if cursor.rowcount is not None else 0
+
+
+def get_settings() -> dict[str, Any]:
+    """Return the persisted settings merged over the defaults."""
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key = ?", (SETTINGS_ROW_KEY,)
+        ).fetchone()
+    stored: Any = {}
+    if row is not None:
+        try:
+            stored = json.loads(row["value"])
+        except (TypeError, ValueError):
+            stored = {}
+    return _sanitize_settings(_merge_known(DEFAULT_SETTINGS, DEFAULT_SETTINGS, stored))
+
+
+def save_settings(patch: dict[str, Any]) -> dict[str, Any]:
+    """Deep-merge a partial settings patch, persist it, and return the result."""
+    current = get_settings()
+    merged = _sanitize_settings(_merge_known(DEFAULT_SETTINGS, current, patch))
+    payload = json.dumps(merged)
+    init_db()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO settings (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (SETTINGS_ROW_KEY, payload),
+        )
+    return merged
 
 
 def stats() -> dict[str, Any]:

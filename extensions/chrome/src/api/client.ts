@@ -22,6 +22,28 @@ export interface ClientConfig {
   authToken?: string;
 }
 
+export interface FlowSyncSettings {
+  capture: {
+    paused: boolean;
+    autoCaptureErrors: boolean;
+    terminalCommands: boolean;
+    browserTabs: boolean;
+    personalNotes: boolean;
+    idleGapMinutes: number;
+  };
+  notifications: {
+    errorToasts: boolean;
+  };
+  chrome: {
+    allowedDomains: string[];
+  };
+  vscode: {
+    stuckThresholdMinutes: number;
+    redactSecrets: boolean;
+    syncIntervalSec: number;
+  };
+}
+
 export interface SocketHandle {
   close: () => void;
 }
@@ -32,6 +54,7 @@ const DEFAULT_CONFIG: Required<ClientConfig> = {
 };
 
 const EVENT_PATH = "/api/v1/events";
+const SETTINGS_PATH = "/api/v1/settings";
 const WS_PATH = "/ws/events";
 const MAX_ATTEMPTS = 5;
 const BASE_BACKOFF_MS = 1000;
@@ -72,6 +95,22 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
   } finally {
     clearTimeout(timer);
   }
+}
+
+export async function fetchSettings(): Promise<FlowSyncSettings> {
+  if (!config.authToken) throw new Error("No API key configured");
+  const response = await fetchWithTimeout(
+    `${config.baseUrl}${SETTINGS_PATH}`,
+    {
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${config.authToken}`,
+      },
+    },
+    REQUEST_TIMEOUT_MS,
+  );
+  if (!response.ok) throw new Error(`Settings request failed: HTTP ${response.status}`);
+  return (await response.json()) as FlowSyncSettings;
 }
 
 export async function postEvents(events: FlowSyncEvent[]): Promise<SyncResult> {
