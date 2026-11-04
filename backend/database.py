@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -33,25 +34,39 @@ def init_db() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON events(type)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_events_source ON events(source)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_events_project ON events(project)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_events_fingerprint ON events(type, project, source, ts)"
+        )
 
 
 def insert_events(events: list[dict[str, Any]]) -> list[str]:
+    """Insert events, ignoring both duplicate ids and identical retried events.
+
+    VS Code events historically arrived without an id, so a retried batch could
+    create duplicate rows with fresh uuids. Comparing the immutable fingerprint
+    (type/project/source/ts/payload) keeps retries idempotent as well.
+    Returns only ids that were actually inserted.
+    """
     init_db()
     accepted: list[str] = []
     with _connect() as conn:
         for event in events:
-            conn.execute(
+            project = event.get("project") or "default"
+            source = event.get("source") or "chrome"
+            ts = int(event["ts"])
+            payload = json.dumps(event.get("payload") or {})
+            existing = conn.execute(
+                "SELECT 1 FROM events WHERE type = ? AND project = ? AND source = ? AND ts = ? AND payload = ? LIMIT 1",
+                (event["type"], project, source, ts, payload),
+            ).fetchone()
+            if existing is not None:
+                continue
+            cursor = conn.execute(
                 "INSERT OR IGNORE INTO events (id, type, project, source, ts, payload) VALUES (?, ?, ?, ?, ?, ?)",
-                (
-                    event["id"],
-                    event["type"],
-                    event.get("project") or "default",
-                    event.get("source") or "chrome",
-                    int(event["ts"]),
-                    json.dumps(event.get("payload") or {}),
-                ),
+                (event["id"], event["type"], project, source, ts, payload),
             )
-            accepted.append(event["id"])
+            if cursor.rowcount > 0:
+                accepted.append(event["id"])
     return accepted
 
 
@@ -75,6 +90,8 @@ def list_events(
     limit: int = 50,
     event_type: Optional[str] = None,
     project: Optional[str] = None,
+    from_ts: Optional[int] = None,
+    to_ts: Optional[int] = None,
 ) -> list[dict[str, Any]]:
     init_db()
     query = "SELECT id, type, project, source, ts, payload FROM events"
@@ -86,13 +103,32 @@ def list_events(
     if project:
         filters.append("project = ?")
         params.append(project)
+    if from_ts is not None:
+        filters.append("ts >= ?")
+        params.append(int(from_ts))
+    if to_ts is not None:
+        filters.append("ts <= ?")
+        params.append(int(to_ts))
     if filters:
         query += " WHERE " + " AND ".join(filters)
-    query += " ORDER BY ts DESC LIMIT ?"
-    params.append(limit)
+    # Keep the existing newest-first behaviour (and LIMIT semantics) when no
+    # date range is supplied; the frontend orders rows itself.
+    query += " ORDER BY ts DESC"
+    if limit is not None:
+        query += " LIMIT ?"
+        params.append(limit)
     with _connect() as conn:
         rows = conn.execute(query, params).fetchall()
     return [_row_to_event(row) for row in rows]
+
+
+def delete_events_older_than(days: int) -> int:
+    """Delete events older than ``days`` and return the number of rows removed."""
+    init_db()
+    cutoff_ms = int(time.time() * 1000) - max(1, int(days)) * 24 * 60 * 60 * 1000
+    with _connect() as conn:
+        cursor = conn.execute("DELETE FROM events WHERE ts < ?", (cutoff_ms,))
+        return cursor.rowcount if cursor.rowcount is not None else 0
 
 
 def stats() -> dict[str, Any]:

@@ -5,6 +5,7 @@ import {
   configureClient,
   connectSocket,
   postEvents,
+  uuid,
   SocketHandle,
 } from "./api/client";
 import { FlowSyncPanel } from "./panel";
@@ -18,6 +19,55 @@ const EVENT_TYPES = {
 } as const;
 
 const DEFAULT_PROJECT = "unknown-workspace";
+
+// Narrow patterns that indicate a real failure. Normal command echoes (e.g.
+// "cd backend") never match these.
+const ERROR_PATTERNS: RegExp[] = [
+  /(?:^|\n)\s*(?:Traceback \(most recent call last\)|npm ERR!|error TS\d+|Error:|ERROR:|FATAL:|Fatal:|Uncaught (?:Error|Exception)|[A-Za-z_]*Error:)/,
+  /(?:command not found|is not recognized as an internal or external command|No such file or directory|Permission denied|Cannot find module|ModuleNotFoundError|ImportError|SyntaxError|TypeError|ReferenceError|ENOENT|EACCES)/,
+  /(?:^|\n)\s*[A-Za-z_]*Exception(?:[: ]|$)/,
+  /\bfailed with exit code\b/i,
+];
+
+interface ShellCommandLineLike {
+  value?: string;
+}
+
+interface ShellExecutionLike {
+  commandLine?: ShellCommandLineLike;
+  read?: () => AsyncIterable<string>;
+}
+
+interface ShellEndEventLike {
+  execution: ShellExecutionLike;
+  exitCode?: number;
+}
+
+function redactSecrets(text: string): string {
+  return text
+    .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[REDACTED]")
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}/g, "sk-[REDACTED]")
+    .replace(/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, "[REDACTED]")
+    .replace(/\bgh[pousr]_[A-Za-z0-9]{20,}\b/g, "[REDACTED]")
+    .replace(/\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g, "[REDACTED]")
+    .replace(
+      /\b(api[_-]?key|secret|token|password|passwd|authorization)\b(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;]+)/gi,
+      (_match, key: string, separator: string) => `${key}${separator}[REDACTED]`,
+    )
+    .replace(/\b[A-Fa-f0-9]{32,}\b/g, "[REDACTED]")
+    .replace(/\b[A-Za-z0-9_-]{32,}\b/g, "[REDACTED]");
+}
+
+function trimErrorText(text: string): string {
+  const redacted = redactSecrets(text).trim();
+  if (redacted.length <= 500) return redacted;
+  return `…${redacted.slice(-500)}`;
+}
+
+function commandFailed(exitCode: number | undefined, output: string): boolean {
+  if (typeof exitCode === "number" && exitCode !== 0) return true;
+  return ERROR_PATTERNS.some((pattern) => pattern.test(output));
+}
 
 export function activate(context: vscode.ExtensionContext): void {
   reloadConfig();
@@ -43,6 +93,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   function push(eventType: string, payload: VscodeEventPayload): void {
     buffer.push({
+      id: uuid(),
       type: eventType,
       project: getProject(),
       ts: Date.now(),
@@ -150,86 +201,160 @@ export function activate(context: vscode.ExtensionContext): void {
     void flush();
   });
 
-  // --- Stuck detection (no typing/editing for 4 min, then stuck for 1 min) ---
+  // --- Diagnostics state (also drives stuck detection) ---
+  interface TrackedError {
+    message: string;
+    fileName: string;
+    at: number;
+  }
+  const errorTracker = new Map<string, TrackedError>();
+  let recentFailure: { at: number; command: string; output: string } | undefined;
+
+  function latestDiagnostic(): TrackedError | undefined {
+    let latest: TrackedError | undefined;
+    for (const entry of errorTracker.values()) {
+      if (!latest || entry.at > latest.at) latest = entry;
+    }
+    return latest;
+  }
+
+  function recordDiagnostics(uri: vscode.Uri, diagnostics: vscode.Diagnostic[], emit: boolean): void {
+    const key = uri.toString();
+    const errors = diagnostics.filter((d) => d.severity === vscode.DiagnosticSeverity.Error);
+    if (errors.length === 0) {
+      errorTracker.delete(key);
+      return;
+    }
+    const first = errors[0];
+    const previous = errorTracker.get(key);
+    if (previous?.message === first.message) return;
+    errorTracker.set(key, {
+      message: first.message,
+      fileName: vscode.workspace.asRelativePath(uri),
+      at: Date.now(),
+    });
+    if (!emit) return;
+    push(EVENT_TYPES.DIAGNOSTIC_ERROR, {
+      fileName: vscode.workspace.asRelativePath(uri),
+      language: uri.path.split(".").pop() ?? undefined,
+      errorMessage:
+        first.message.length > 500
+          ? `${first.message.slice(0, 500)}…`
+          : first.message,
+      severity: "error",
+    });
+    void flush();
+  }
+
+  // Seed the tracker so stuck detection knows about errors already on screen.
+  for (const [uri, diagnostics] of vscode.languages.getDiagnostics()) {
+    recordDiagnostics(uri, diagnostics, false);
+  }
+  vscode.languages.onDidChangeDiagnostics((event) => {
+    for (const uri of event.uris) {
+      recordDiagnostics(uri, vscode.languages.getDiagnostics(uri), true);
+    }
+  });
+
+  // --- Stuck detection: only focused + real unresolved/failed evidence ---
   const idleThresholdMs = 4 * 60 * 1000;
-  const stuckThresholdMs = 60 * 1000;
+  const failureWindowMs = 15 * 60 * 1000;
   let lastActivityAt = Date.now();
-  let stuckSince: number | undefined;
+  let stuckReported = false;
 
   function markActivity(): void {
     lastActivityAt = Date.now();
-    stuckSince = undefined;
+    stuckReported = false;
+  }
+
+  function recentFailedCommand(now: number) {
+    return recentFailure && now - recentFailure.at <= failureWindowMs ? recentFailure : undefined;
   }
 
   idleTimer = setInterval(() => {
     const now = Date.now();
-    if (stuckSince === undefined && now - lastActivityAt >= idleThresholdMs) {
-      stuckSince = now;
-      return;
-    }
-    if (stuckSince !== undefined && now - stuckSince >= stuckThresholdMs) {
-      push(EVENT_TYPES.DEVELOPER_STUCK, {
-        stuckDuration: now - stuckSince,
-      });
-      stuckSince = undefined;
-      lastActivityAt = now;
-      void flush();
-    }
-  }, 10 * 1000);
+    if (stuckReported) return;
+    if (now - lastActivityAt < idleThresholdMs) return;
+    if (!vscode.window.state.focused) return;
 
-  vscode.workspace.onDidChangeTextDocument((change) => {
+    const diagnostic = latestDiagnostic();
+    const failure = recentFailedCommand(now);
+    if (!diagnostic && !failure) return;
+
+    // One event per stuck period. The flag only resets on real activity or on
+    // regaining window focus, so being away cannot produce a stream of events.
+    stuckReported = true;
+    const reason =
+      diagnostic?.message ||
+      failure?.output ||
+      (failure ? `Command failed: ${failure.command}` : "");
+    push(EVENT_TYPES.DEVELOPER_STUCK, {
+      stuckDuration: now - lastActivityAt,
+      errorMessage: reason ? trimErrorText(reason) : undefined,
+      fileName: diagnostic?.fileName,
+      command: failure?.command,
+    });
+    void flush();
+  }, 15 * 1000);
+
+  vscode.workspace.onDidChangeTextDocument(() => {
     markActivity();
   });
 
-  // --- Terminal diagnostics (shell integration requires VS Code 1.88+) ---
-  const onStartTerminal = (
-    vscode.window as unknown as {
-      onDidStartTerminalShellExecution?: (
-        listener: (event: {
-          execution: { commandLine: { value: string } | undefined };
-        }) => void,
-      ) => vscode.Disposable;
-    }
-  ).onDidStartTerminalShellExecution;
-  if (onStartTerminal) {
-    onStartTerminal((event) => {
-      const commandLine = event.execution.commandLine?.value;
-      push(EVENT_TYPES.TERMINAL_ERROR, {
-        terminalOutput: commandLine || "unknown",
-      });
-      markActivity();
-      void flush();
-    });
-  }
-
-  // --- Diagnostics ---
-  const errorTracker = new Map<string, { message: string }>();
-  vscode.languages.onDidChangeDiagnostics((event) => {
-    for (const uri of event.uris) {
-      const errors = vscode.languages
-        .getDiagnostics(uri)
-        .filter((d) => d.severity === vscode.DiagnosticSeverity.Error);
-      if (errors.length === 0) {
-        errorTracker.delete(uri.toString());
-        continue;
-      }
-      const first = errors[0];
-      if (errorTracker.get(uri.toString())?.message === first.message) {
-        continue;
-      }
-      errorTracker.set(uri.toString(), { message: first.message });
-      push(EVENT_TYPES.DIAGNOSTIC_ERROR, {
-        fileName: vscode.workspace.asRelativePath(uri),
-        language: uri.path.split(".").pop() ?? undefined,
-        errorMessage:
-          first.message.length > 500
-            ? `${first.message.slice(0, 500)}…`
-            : first.message,
-        severity: "error",
-      });
-      void flush();
+  // Returning from another window/app is not itself "stuck": restart the idle
+  // window while focused so only genuine in-editor inactivity counts.
+  vscode.window.onDidChangeWindowState((state) => {
+    if (state.focused) {
+      lastActivityAt = Date.now();
+      stuckReported = false;
     }
   });
+
+  // --- Real terminal failures only (shell integration; VS Code 1.88+) ---
+  const terminalApi = vscode.window as unknown as {
+    onDidEndTerminalShellExecution?: (
+      listener: (event: ShellEndEventLike) => void,
+    ) => vscode.Disposable;
+  };
+  if (terminalApi.onDidEndTerminalShellExecution) {
+    const disposable = terminalApi.onDidEndTerminalShellExecution((event) => {
+      const command = event.execution.commandLine?.value?.trim() || "unknown";
+      const exitCode = event.exitCode;
+      markActivity();
+      void (async () => {
+        let output = "";
+        const read = event.execution.read;
+        try {
+          if (read) {
+            for await (const chunk of read()) {
+              output += chunk;
+              if (output.length > 20000) output = output.slice(-10000);
+            }
+          }
+        } catch {
+          // Shell integration may stop streaming when the terminal closes.
+        }
+        const text = output.trim();
+        if (!commandFailed(exitCode, text)) return;
+        const commandText = redactSecrets(command).slice(0, 300);
+        const errorText = trimErrorText(
+          text ||
+            (typeof exitCode === "number"
+              ? `Command exited with code ${exitCode}`
+              : "Command failed"),
+        );
+        recentFailure = { at: Date.now(), command: commandText, output: errorText };
+        push(EVENT_TYPES.TERMINAL_ERROR, {
+          command: commandText,
+          terminalOutput: errorText,
+          errorMessage: errorText,
+          exitCode: typeof exitCode === "number" ? exitCode : undefined,
+        });
+        void flush();
+      })();
+    });
+    context.subscriptions.push(disposable);
+  }
 
   startSyncTimer();
   openSocket();

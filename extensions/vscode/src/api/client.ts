@@ -3,12 +3,15 @@ export interface VscodeEventPayload {
   language?: string;
   errorMessage?: string;
   terminalOutput?: string;
+  command?: string;
+  exitCode?: number;
   stuckDuration?: number;
   switchCount?: number;
   severity?: string;
 }
 
 export interface FlowSyncEvent {
+  id: string;
   type: string;
   project: string;
   ts: number;
@@ -39,6 +42,18 @@ let config: Required<ClientConfig> = {
 
 export function configureClient(next: ClientConfig): void {
   config = { ...config, ...next };
+}
+
+export function uuid(): string {
+  const cryptoObj = globalThis.crypto;
+  if (cryptoObj && typeof cryptoObj.randomUUID === "function") {
+    return cryptoObj.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (ch) => {
+    const r = (Math.random() * 16) | 0;
+    const v = ch === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 }
 
 function sleep(ms: number): Promise<void> {

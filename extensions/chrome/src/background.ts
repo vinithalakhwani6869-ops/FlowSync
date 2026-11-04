@@ -68,7 +68,7 @@ async function ensureTracked(
     await closeDwell(prev, now);
   }
 
-  const visitCount = emitVisit ? await nextVisitCount(url) : prev && prev.url === url ? prev.visitCount : 0;
+  const visitCount = emitVisit ? await nextVisitCount(url, now) : prev && prev.url === url ? prev.visitCount : 0;
   const state: TabState = {
     url,
     title: title ?? prev?.title ?? "",

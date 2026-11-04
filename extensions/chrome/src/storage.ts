@@ -62,11 +62,22 @@ async function readVisits(): Promise<VisitMap> {
   return map && typeof map === "object" ? map : {};
 }
 
-export async function nextVisitCount(url: string): Promise<number> {
+function localDayKey(ts: number): string {
+  const date = new Date(ts);
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+export async function nextVisitCount(url: string, ts: number = Date.now()): Promise<number> {
   const visits = await readVisits();
   const cleanUrl = sanitizeUrl(url);
-  const count = (visits[cleanUrl] ?? 0) + 1;
-  visits[cleanUrl] = count;
+  // Count per sanitized URL per local calendar day. The day is part of the key
+  // so the counter naturally resets at local midnight instead of growing for
+  // the lifetime of the extension install.
+  const key = `${localDayKey(ts)}::${cleanUrl}`;
+  const count = (visits[key] ?? 0) + 1;
+  visits[key] = count;
 
   const keys = Object.keys(visits);
   if (keys.length > MAX_VISIT_URLS) {

@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.configureClient = configureClient;
+exports.uuid = uuid;
 exports.postEvents = postEvents;
 exports.connectSocket = connectSocket;
 const EVENT_PATH = "/api/v1/events";
@@ -14,6 +15,17 @@ let config = {
 };
 function configureClient(next) {
     config = { ...config, ...next };
+}
+function uuid() {
+    const cryptoObj = globalThis.crypto;
+    if (cryptoObj && typeof cryptoObj.randomUUID === "function") {
+        return cryptoObj.randomUUID();
+    }
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (ch) => {
+        const r = (Math.random() * 16) | 0;
+        const v = ch === "x" ? r : (r & 0x3) | 0x8;
+        return v.toString(16);
+    });
 }
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));

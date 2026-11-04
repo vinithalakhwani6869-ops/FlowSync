@@ -92,11 +92,16 @@ async def post_events(batch: EventsBatch) -> dict[str, list[str]]:
             }
         )
     accepted = database.insert_events(rows)
-    for event in batch.events:
-        await manager.broadcast(
-            {"type": "event", "event": event.model_dump()},
-            project=event.project,
-        )
+    accepted_ids = set(accepted)
+    # Only broadcast rows that were actually inserted. Retried batches used to
+    # be broadcast again even though the database ignored them, which showed up
+    # as duplicate feed rows.
+    for row in rows:
+        if row["id"] in accepted_ids:
+            await manager.broadcast(
+                {"type": "event", "event": row},
+                project=row["project"],
+            )
     return {"accepted": accepted}
 
 
@@ -105,8 +110,18 @@ def get_events(
     limit: int = Query(50, ge=1, le=500),
     type: Optional[str] = Query(None, alias="type"),
     project: Optional[str] = None,
+    from_ts: Optional[int] = Query(None, alias="from"),
+    to_ts: Optional[int] = Query(None, alias="to"),
 ) -> dict[str, list[dict[str, Any]]]:
-    return {"events": database.list_events(limit=limit, event_type=type, project=project)}
+    return {
+        "events": database.list_events(
+            limit=limit,
+            event_type=type,
+            project=project,
+            from_ts=from_ts,
+            to_ts=to_ts,
+        )
+    }
 
 
 @router.websocket("/ws/events")

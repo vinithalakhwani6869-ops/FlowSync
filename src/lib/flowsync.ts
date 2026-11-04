@@ -9,6 +9,15 @@ export interface FlowSyncEvent {
     title?: string;
     dwellTime?: number;
     visitCount?: number;
+    fileName?: string;
+    language?: string;
+    errorMessage?: string;
+    terminalOutput?: string;
+    command?: string;
+    exitCode?: number;
+    stuckDuration?: number;
+    switchCount?: number;
+    severity?: string;
   };
 }
 
@@ -42,8 +51,14 @@ async function getJson<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function fetchEvents(limit = 200): Promise<FlowSyncEvent[]> {
-  const body = await getJson<{ events: FlowSyncEvent[] }>(`/api/v1/events?limit=${limit}`);
+export async function fetchEvents(
+  limit = 200,
+  range?: { from?: number; to?: number },
+): Promise<FlowSyncEvent[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (range?.from !== undefined) params.set("from", String(Math.floor(range.from)));
+  if (range?.to !== undefined) params.set("to", String(Math.floor(range.to)));
+  const body = await getJson<{ events: FlowSyncEvent[] }>(`/api/v1/events?${params.toString()}`);
   return body.events;
 }
 
@@ -169,6 +184,14 @@ export function formatDuration(ms: number): string {
 
 export function formatHours(ms: number): string {
   return (ms / 3_600_000).toFixed(1);
+}
+
+export function formatIdle(ms: number): string {
+  const totalMinutes = Math.max(1, Math.round(ms / 60_000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) return `${minutes}m`;
+  return `${hours}h ${minutes}m`;
 }
 
 export function formatRelative(ts: number): string {

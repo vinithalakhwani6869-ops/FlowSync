@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import secrets
 from typing import Any, Optional
@@ -126,6 +127,48 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 database.init_db()
+
+DEFAULT_RETENTION_DAYS = 30
+RETENTION_INTERVAL_SECONDS = 24 * 60 * 60
+
+
+def _retention_days() -> int:
+    raw = os.environ.get("RETENTION_DAYS", str(DEFAULT_RETENTION_DAYS))
+    try:
+        days = int(raw)
+    except (TypeError, ValueError):
+        days = DEFAULT_RETENTION_DAYS
+    return days if days > 0 else DEFAULT_RETENTION_DAYS
+
+
+def _run_retention_cleanup() -> None:
+    days = _retention_days()
+    deleted = database.delete_events_older_than(days)
+    print(
+        f"[flowsync] retention cleanup: deleted {deleted} event(s) older than {days} day(s)",
+        flush=True,
+    )
+
+
+async def _retention_loop() -> None:
+    while True:
+        try:
+            await asyncio.to_thread(_run_retention_cleanup)
+        except Exception as error:  # keep the scheduler alive on transient failures
+            print(f"[flowsync] retention cleanup failed: {error}", flush=True)
+        await asyncio.sleep(RETENTION_INTERVAL_SECONDS)
+
+
+@app.on_event("startup")
+async def start_retention_cleanup() -> None:
+    app.state.retention_task = asyncio.create_task(_retention_loop())
+
+
+@app.on_event("shutdown")
+async def stop_retention_cleanup() -> None:
+    task = getattr(app.state, "retention_task", None)
+    if task is not None:
+        task.cancel()
 
 
 @app.get("/health")

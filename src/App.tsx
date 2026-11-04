@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   LayoutDashboard, FolderOpen, Clock, Shield, Settings,
   ChevronRight, ExternalLink, Copy, Check, ArrowDown,
@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import {
   connectEvents, fetchEvents, fetchStats, formatDuration,
-  formatHours, formatRelative, formatTime,
+  formatHours, formatIdle, formatRelative, formatTime,
 } from "./lib/flowsync";
 import type { FlowSyncEvent, FlowSyncStats, LiveConnectionStatus } from "./lib/flowsync";
 
@@ -117,7 +117,7 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
               Developer memory layer — not another AI assistant
             </div>
             <h1 className="text-[32px] md:text-[52px] font-bold text-foreground leading-[1.1] tracking-tight mb-6">
-              FlowSync reconstructs the exact path that led to your fix —{" "}
+              FlowSync reconstructs the exact path that led to your fix -{" "}
               <span className="text-primary">automatically.</span>
             </h1>
             <p className="text-lg text-muted-foreground leading-relaxed mb-8 max-w-lg">
@@ -478,97 +478,327 @@ function DashboardScreen({ navigate }: { navigate: (s: Screen) => void }) {
 
 // ─── LIVE CAPTURE ────────────────────────────────────────────────────────────
 
+type RowIcon = React.ComponentType<{ size?: number | string; className?: string }>;
+
 interface CaptureRow {
   id: string;
+  type: string;
+  project: string;
+  ts: number;
   source: string;
-  detail: string;
+  sourceName: string;
+  sourceColor: string;
+  title: string;
+  detail?: string;
   time: string;
-  icon: React.ComponentType<{ size?: number | string; className?: string }>;
+  icon: RowIcon;
   color: string;
 }
 
-function eventDetail(event: FlowSyncEvent): string {
-  const title = event.payload.title || event.payload.url || "";
-  if (event.type === "tab.dwell") {
-    const dwell = event.payload.dwellTime ?? 0;
-    return title ? `${title} — dwelled ${formatDuration(dwell)}` : `Dwelled ${formatDuration(dwell)}`;
-  }
-  if (event.type === "session.start") return "Chrome extension session started";
-  if (event.type === "tab.visit") {
-    const visits = event.payload.visitCount ?? 0;
-    return title ? `${title} (visit ${visits})` : `Visited page (visit ${visits})`;
-  }
-  return title || event.type;
+function shortenText(text: string, max = 90): string {
+  const singleLine = text.replace(/\s+/g, " ").trim();
+  return singleLine.length > max ? `${singleLine.slice(0, max - 1)}…` : singleLine;
 }
 
-function toCaptureRow(event: FlowSyncEvent): CaptureRow {
-  let icon: React.ComponentType<{ size?: number | string; className?: string }> = Globe;
-  let color = "text-blue-600 bg-blue-50";
-  if (event.type === "tab.dwell") {
-    icon = Clock;
-    color = "text-emerald-600 bg-emerald-50";
-  } else if (event.type === "session.start") {
-    icon = Activity;
-    color = "text-amber-600 bg-amber-50";
+function prettyEventType(type: string): string {
+  const label = type.replace(/[._-]+/g, " ").trim();
+  return label ? label.charAt(0).toUpperCase() + label.slice(1) : "Event";
+}
+
+function eventHostPath(url?: string): string {
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname === "/" ? "" : parsed.pathname.replace(/\/$/, "");
+    return `${parsed.hostname}${path}`;
+  } catch {
+    return url.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  }
+}
+
+function sanitizeVisitUrl(url?: string): string {
+  if (!url) return "";
+  try {
+    const parsed = new URL(url);
+    parsed.search = "";
+    parsed.hash = "";
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return url;
+  }
+}
+
+function eventDisplay(event: FlowSyncEvent): { title: string; detail?: string } {
+  const payload = event.payload;
+  const page = eventHostPath(payload.url) || payload.title || "";
+  switch (event.type) {
+    case "tab.visit":
+      return {
+        title: page ? `Visited ${page}` : "Visited a page",
+        detail: payload.title && payload.title !== page ? payload.title : undefined,
+      };
+    case "tab.dwell":
+      return {
+        title: page
+          ? `Spent ${formatDuration(payload.dwellTime ?? 0)} on ${page}`
+          : `Spent ${formatDuration(payload.dwellTime ?? 0)} on a page`,
+        detail: payload.title && payload.title !== page ? payload.title : undefined,
+      };
+    case "file.opened":
+      return {
+        title: `Opened ${payload.fileName || "a file"}`,
+        detail: payload.language ? `${payload.language} file` : undefined,
+      };
+    case "terminal.error": {
+      const command = payload.command?.trim();
+      const error = (payload.errorMessage || payload.terminalOutput || "").trim();
+      return {
+        title: command ? `Command failed: ${shortenText(command, 70)}` : "Terminal command failed",
+        detail: error ? shortenText(error, 220) : "Command exited with a non-zero code",
+      };
+    }
+    case "diagnostic.error":
+      return {
+        title: `Error in ${payload.fileName || "a file"}`,
+        detail: payload.errorMessage ? shortenText(payload.errorMessage, 220) : "Unresolved error diagnostic",
+      };
+    case "developer.stuck": {
+      const reason = payload.errorMessage || payload.terminalOutput || "";
+      return {
+        title: reason ? `Stuck — ${shortenText(reason, 80)}` : "Stuck with unresolved errors",
+        detail: payload.stuckDuration
+          ? `No activity for ${formatDuration(payload.stuckDuration)}`
+          : payload.fileName
+            ? payload.fileName
+            : undefined,
+      };
+    }
+    case "context.switching":
+      return {
+        title: "Switched context rapidly",
+        detail: payload.fileName ? `Now in ${payload.fileName}` : undefined,
+      };
+    case "session.start":
+      return { title: "Capture session started", detail: "Extension connected" };
+    default:
+      return {
+        title: prettyEventType(event.type),
+        detail: payload.title || payload.url || payload.errorMessage || payload.fileName || undefined,
+      };
+  }
+}
+
+function sourceVisual(source: string): { name: string; color: string } {
+  if (source === "vscode") {
+    return { name: "VS Code", color: "text-violet-700 bg-violet-50 border-violet-200" };
+  }
+  if (source === "chrome") {
+    return { name: "Chrome", color: "text-blue-700 bg-blue-50 border-blue-200" };
   }
   return {
-    id: event.id,
-    source: "Chrome",
-    detail: eventDetail(event),
-    time: formatTime(event.ts),
-    icon,
-    color,
+    name: source ? source.charAt(0).toUpperCase() + source.slice(1) : "Unknown",
+    color: "text-gray-600 bg-gray-100 border-gray-200",
   };
+}
+
+function eventVisual(event: FlowSyncEvent): { icon: RowIcon; color: string } {
+  if (event.source === "vscode") {
+    return { icon: Code, color: "text-violet-600 bg-violet-50" };
+  }
+  switch (event.type) {
+    case "tab.dwell":
+      return { icon: Clock, color: "text-emerald-600 bg-emerald-50" };
+    case "session.start":
+      return { icon: Activity, color: "text-amber-600 bg-amber-50" };
+    default:
+      return { icon: Globe, color: "text-blue-600 bg-blue-50" };
+  }
+}
+
+function timelineVisual(event: FlowSyncEvent): { icon: RowIcon; color: string } {
+  switch (event.type) {
+    case "terminal.error":
+      return { icon: Terminal, color: "bg-red-100 text-red-700 border-red-200" };
+    case "diagnostic.error":
+      return { icon: AlertCircle, color: "bg-red-100 text-red-700 border-red-200" };
+    case "developer.stuck":
+      return { icon: Clock, color: "bg-amber-100 text-amber-700 border-amber-200" };
+    case "file.opened":
+      return { icon: FileText, color: "bg-violet-100 text-violet-700 border-violet-200" };
+    case "context.switching":
+      return { icon: GitBranch, color: "bg-amber-100 text-amber-700 border-amber-200" };
+    default:
+      return { icon: Globe, color: "bg-blue-100 text-blue-700 border-blue-200" };
+  }
+}
+
+function eventKey(event: FlowSyncEvent): string {
+  if (event.id) return event.id;
+  return `${event.type}|${event.project}|${event.source}|${event.ts}|${JSON.stringify(event.payload)}`;
+}
+
+function dedupeEvents(events: FlowSyncEvent[]): FlowSyncEvent[] {
+  const byKey = new Map<string, FlowSyncEvent>();
+  for (const event of events) {
+    const key = eventKey(event);
+    const existing = byKey.get(key);
+    if (!existing || event.ts >= existing.ts) byKey.set(key, event);
+  }
+  return [...byKey.values()];
+}
+
+function mergeEvents(...lists: FlowSyncEvent[][]): FlowSyncEvent[] {
+  return dedupeEvents(lists.flat());
+}
+
+function countVisitsByUrl(events: FlowSyncEvent[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const event of events) {
+    if (event.type !== "tab.visit" || !event.payload.url) continue;
+    const key = sanitizeVisitUrl(event.payload.url);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function toCaptureRow(event: FlowSyncEvent, visitCounts: Map<string, number>): CaptureRow {
+  const display = eventDisplay(event);
+  const source = sourceVisual(event.source);
+  const visual = eventVisual(event);
+  let detail = display.detail;
+  if (event.type === "tab.visit") {
+    const key = sanitizeVisitUrl(event.payload.url);
+    const count = key ? (visitCounts.get(key) ?? 0) : (event.payload.visitCount ?? 0);
+    const visits = `${count} visit${count === 1 ? "" : "s"}`;
+    detail = detail ? `${visits} · ${detail}` : visits;
+  }
+  return {
+    id: eventKey(event),
+    type: event.type,
+    project: event.project,
+    ts: event.ts,
+    source: event.source,
+    sourceName: source.name,
+    sourceColor: source.color,
+    title: display.title,
+    detail,
+    time: formatTime(event.ts),
+    icon: visual.icon,
+    color: visual.color,
+  };
+}
+
+function toCaptureRows(events: FlowSyncEvent[]): CaptureRow[] {
+  const deduped = dedupeEvents(events).sort((a, b) => b.ts - a.ts);
+  const counts = countVisitsByUrl(deduped);
+  return deduped.map((event) => toCaptureRow(event, counts));
+}
+
+function startOfLocalDay(ts: number): number {
+  const date = new Date(ts);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+function addLocalDays(day: number, delta: number): number {
+  const date = new Date(day);
+  date.setDate(date.getDate() + delta);
+  return startOfLocalDay(date.getTime());
+}
+
+function localDayKey(ts: number): string {
+  const date = new Date(ts);
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function dayRange(day: number): { from: number; to: number } {
+  return { from: startOfLocalDay(day), to: addLocalDays(day, 1) - 1 };
+}
+
+function isSameLocalDay(ts: number, day: number): boolean {
+  return localDayKey(ts) === localDayKey(day);
+}
+
+function dayLabel(ts: number): string {
+  const key = localDayKey(ts);
+  const today = Date.now();
+  if (key === localDayKey(today)) return "Today";
+  if (key === localDayKey(addLocalDays(startOfLocalDay(today), -1))) return "Yesterday";
+  return new Date(ts).toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
 }
 
 function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
   const [isPaused, setIsPaused] = useState(false);
-  const [rows, setRows] = useState<CaptureRow[]>([]);
+  const [rawEvents, setRawEvents] = useState<FlowSyncEvent[]>([]);
   const [status, setStatus] = useState<LiveConnectionStatus>("connecting");
   const [loadError, setLoadError] = useState(false);
-  const [project, setProject] = useState("default");
-  const [sessionStart, setSessionStart] = useState<number | null>(null);
+  const [selectedDay, setSelectedDay] = useState(() => startOfLocalDay(Date.now()));
+  const [reloadToken, setReloadToken] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   const pausedRef = useRef(isPaused);
+  const dayRef = useRef(selectedDay);
 
   useEffect(() => {
     pausedRef.current = isPaused;
   }, [isPaused]);
 
   useEffect(() => {
-    let disposed = false;
+    dayRef.current = selectedDay;
+  }, [selectedDay]);
+
+  useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
-    const load = () => {
-      setLoadError(false);
-      void fetchEvents(200)
-        .then((list) => {
-          if (disposed) return;
-          setRows(list.map(toCaptureRow));
-          if (list.length > 0) {
-            setProject(list[0].project);
-            setSessionStart(list[list.length - 1].ts);
-          }
-        })
-        .catch(() => {
-          if (!disposed) setLoadError(true);
-        });
+  // Load the selected local day from the backend. The WebSocket supplies live
+  // additions; both paths go through the same id-dedupe/merge helper.
+  useEffect(() => {
+    let disposed = false;
+    setLoadError(false);
+    setRawEvents((prev) => prev.filter((event) => isSameLocalDay(event.ts, selectedDay)));
+    void fetchEvents(500, dayRange(selectedDay))
+      .then((list) => {
+        if (disposed) return;
+        setRawEvents((prev) =>
+          mergeEvents(
+            prev.filter((event) => isSameLocalDay(event.ts, selectedDay)),
+            list,
+          ),
+        );
+      })
+      .catch(() => {
+        if (!disposed) setLoadError(true);
+      });
+    return () => {
+      disposed = true;
     };
+  }, [selectedDay, reloadToken]);
 
-    load();
-
+  useEffect(() => {
+    let disposed = false;
     const handle = connectEvents(
       (list) => {
         if (disposed) return;
-        setRows(list.map(toCaptureRow));
-        if (list.length > 0) {
-          setProject(list[0].project);
-          setSessionStart(list[list.length - 1].ts);
-        }
+        const day = dayRef.current;
+        setRawEvents((prev) =>
+          mergeEvents(
+            prev.filter((event) => isSameLocalDay(event.ts, day)),
+            list.filter((event) => isSameLocalDay(event.ts, day)),
+          ),
+        );
       },
       (event) => {
         if (disposed || pausedRef.current) return;
-        setRows((prev) => [toCaptureRow(event), ...prev].slice(0, 300));
+        const day = dayRef.current;
+        if (!isSameLocalDay(event.ts, day)) return;
+        setRawEvents((prev) => mergeEvents(prev, [event]));
       },
       (nextStatus) => {
         if (!disposed) setStatus(nextStatus);
@@ -578,13 +808,18 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
     return () => {
       disposed = true;
       handle.close();
-      clearInterval(timer);
     };
   }, []);
+
+  const rows = useMemo(() => toCaptureRows(rawEvents), [rawEvents]);
 
   const isLive = status === "live";
   const isNoKey = status === "no-key";
   const isReconnecting = status === "reconnecting" || status === "connecting";
+  const isToday = localDayKey(selectedDay) === localDayKey(Date.now());
+  const project = rows[0]?.project ?? "default";
+  const sessionStart = rows.length > 0 ? rows[rows.length - 1].ts : null;
+  const sessionEnd = rows.length > 0 ? rows[0].ts : null;
 
   const flowSteps = [
     { label: "Chrome Tabs", icon: Globe, active: rows.length > 0 },
@@ -596,7 +831,9 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
     { label: "Context Captured", icon: CheckCircle2, active: rows.length > 0, final: true },
   ];
 
-  const durationMs = sessionStart ? Math.max(0, now - sessionStart) : 0;
+  const durationMs = sessionStart
+    ? Math.max(0, (isToday || !sessionEnd ? now : sessionEnd) - sessionStart)
+    : 0;
   const sessionInfo = [
     { label: "Project", value: project === "default" ? "Default" : project },
     { label: "Duration", value: formatDuration(durationMs) },
@@ -604,6 +841,9 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
     { label: "Connection", value: isNoKey ? "API key required" : isLive ? "Live" : "Reconnecting" },
     { label: "Status", value: isPaused ? "Paused" : "Session active" },
   ];
+
+  const changeDay = (delta: number) => setSelectedDay((day) => addLocalDays(day, delta));
+  const goToToday = () => setSelectedDay(startOfLocalDay(Date.now()));
 
   return (
     <DashboardLayout navigate={navigate} active="capture">
@@ -632,11 +872,42 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
           {/* Activity feed */}
           <div className="xl:col-span-2">
             <Card className="overflow-hidden">
-              <div className="px-4 sm:px-6 py-4 border-b border-border flex items-center justify-between">
-                <h2 className="font-semibold text-foreground">Activity Feed</h2>
-                <Badge color="blue">{rows.length} events</Badge>
+              <div className="px-4 sm:px-6 py-4 border-b border-border flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <h2 className="font-semibold text-foreground">Activity Feed</h2>
+                  <Badge color="blue">{rows.length} events</Badge>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => changeDay(-1)}
+                    aria-label="Previous day"
+                    className="w-8 h-8 flex items-center justify-center border border-border bg-white text-foreground rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    <ChevronRight size={14} className="rotate-180" />
+                  </button>
+                  <button
+                    onClick={goToToday}
+                    title="Jump to today"
+                    className="px-3 h-8 text-xs font-medium text-foreground border border-border bg-white rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    {dayLabel(selectedDay)}
+                  </button>
+                  <button
+                    onClick={() => changeDay(1)}
+                    disabled={isToday}
+                    aria-label="Next day"
+                    className="w-8 h-8 flex items-center justify-center border border-border bg-white text-foreground rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <ChevronRight size={14} />
+                  </button>
+                </div>
               </div>
               <div className="divide-y divide-border max-h-[520px] overflow-y-auto">
+                <div className="px-4 sm:px-6 py-2 bg-gray-50 border-b border-border">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {dayLabel(selectedDay)}
+                  </span>
+                </div>
                 {isNoKey && (
                   <div className="px-4 sm:px-6 py-3 bg-amber-50 border-b border-amber-200 text-xs text-amber-800">
                     Live updates are off — no API key set. Add it and refresh:{" "}
@@ -651,7 +922,7 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
                       Could not reach the FlowSync backend at /api/v1/events.
                     </div>
                     <button
-                      onClick={() => { setLoadError(false); void fetchEvents(200).then((list) => setRows(list.map(toCaptureRow))).catch(() => setLoadError(true)); }}
+                      onClick={() => setReloadToken((token) => token + 1)}
                       className="inline-flex items-center gap-2 border border-border bg-white text-sm font-medium text-foreground px-4 py-2 rounded-xl hover:bg-gray-50 transition-colors"
                     >
                       <RefreshCw size={14} /> Retry
@@ -659,31 +930,58 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
                   </div>
                 ) : rows.length === 0 ? (
                   <div className="px-4 sm:px-6 py-12 text-center text-sm text-muted-foreground">
-                    No events yet — browse a page and FlowSync events will appear here live.
+                    No events for {dayLabel(selectedDay).toLowerCase()}. Browse, code, or switch to another day.
                   </div>
                 ) : (
-                  rows.map((row, i) => {
-                    const RowIcon = row.icon;
-                    return (
-                      <div key={row.id} className="px-4 sm:px-6 py-4 flex items-start gap-4 hover:bg-gray-50 transition-colors">
-                        <div className="flex flex-col items-center gap-1 flex-shrink-0 w-14 sm:w-16 text-right">
-                          <div className="text-xs font-mono text-muted-foreground">{row.time}</div>
-                        </div>
-                        <div className="flex items-start gap-3 flex-1">
-                          <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 ${row.color}`}>
-                            <RowIcon size={14} />
+                  (() => {
+                    const items: React.ReactNode[] = [];
+                    for (let i = 0; i < rows.length; i += 1) {
+                      const row = rows[i];
+                      const RowIcon = row.icon;
+                      const prev = rows[i - 1];
+                      if (prev) {
+                        const gap = prev.ts - row.ts;
+                        if (gap >= 15 * 60 * 1000) {
+                          items.push(
+                            <div key={`idle-${row.id}`} className="px-4 sm:px-6 py-2 flex items-center gap-3 bg-gray-50/70">
+                              <div className="flex-1 h-px bg-border" />
+                              <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                Idle · {formatIdle(gap)}
+                              </span>
+                              <div className="flex-1 h-px bg-border" />
+                            </div>,
+                          );
+                        }
+                      }
+                      items.push(
+                        <div key={row.id} className="px-4 sm:px-6 py-4 flex items-start gap-4 hover:bg-gray-50 transition-colors">
+                          <div className="flex flex-col items-center gap-1 flex-shrink-0 w-14 sm:w-16 text-right">
+                            <div className="text-xs font-mono text-muted-foreground">{row.time}</div>
                           </div>
-                          <div>
-                            <div className="text-sm font-semibold text-foreground">{row.source}</div>
-                            <div className="text-sm text-muted-foreground mt-0.5">{row.detail}</div>
+                          <div className="flex items-start gap-3 flex-1 min-w-0">
+                            <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 ${row.color}`}>
+                              <RowIcon size={14} />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <div className="text-sm font-semibold text-foreground">{row.title}</div>
+                                <span className={`inline-flex items-center px-1.5 py-0.5 text-[11px] font-medium rounded-full border ${row.sourceColor}`}>
+                                  {row.sourceName}
+                                </span>
+                              </div>
+                              {row.detail ? (
+                                <div className="text-sm text-muted-foreground mt-0.5 break-words">{row.detail}</div>
+                              ) : null}
+                            </div>
                           </div>
-                        </div>
-                        {i === rows.length - 1 && isLive && !isPaused && (
-                          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0 mt-2" />
-                        )}
-                      </div>
-                    );
-                  })
+                          {i === 0 && isLive && !isPaused && isToday && (
+                            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0 mt-2" />
+                          )}
+                        </div>,
+                      );
+                    }
+                    return items;
+                  })()
                 )}
               </div>
             </Card>
@@ -917,24 +1215,133 @@ function VSCodeScreen({ navigate }: { navigate: (s: Screen) => void }) {
 
 // ─── TIMELINE ────────────────────────────────────────────────────────────────
 
-function TimelineScreen({ navigate }: { navigate: (s: Screen) => void }) {
-  const [copiedCmd, setCopiedCmd] = useState<number | null>(null);
+const SESSION_GAP_MS = 30 * 60 * 1000;
+const TIMELINE_EVENT_TYPES = new Set([
+  "tab.visit",
+  "file.opened",
+  "terminal.error",
+  "diagnostic.error",
+  "developer.stuck",
+  "context.switching",
+]);
 
-  const events = [
-    { time: "09:20", type: "search", icon: Search, color: "bg-blue-100 text-blue-700 border-blue-200", title: "Google Search", detail: "python requests module not found virtual environment", action: null },
-    { time: "09:23", type: "so", icon: Globe, color: "bg-orange-100 text-orange-700 border-orange-200", title: "Stack Overflow", detail: "How to fix ModuleNotFoundError for requests in Python venv", action: { label: "Open link", type: "link" } },
-    { time: "09:27", type: "github", icon: GitBranch, color: "bg-gray-100 text-gray-700 border-gray-200", title: "GitHub Issue #126", detail: "pip install fails silently when venv not activated", action: { label: "Open issue", type: "link" } },
-    { time: "09:31", type: "docs", icon: FileText, color: "bg-yellow-100 text-yellow-700 border-yellow-200", title: "Python Documentation", detail: "venv — Creation of virtual environments (docs.python.org)", action: { label: "Open docs", type: "link" } },
-    { time: "09:34", type: "terminal", icon: Terminal, color: "bg-emerald-100 text-emerald-700 border-emerald-200", title: "Terminal Command", detail: "pip install requests", isCode: true, action: { label: "Copy command", type: "copy", cmd: "pip install requests" } },
-    { time: "09:36", type: "terminal", icon: Terminal, color: "bg-emerald-100 text-emerald-700 border-emerald-200", title: "Terminal Command", detail: "source venv/bin/activate && pip install requests", isCode: true, action: { label: "Copy command", type: "copy", cmd: "source venv/bin/activate && pip install requests" } },
-    { time: "09:37", type: "git", icon: GitBranch, color: "bg-violet-100 text-violet-700 border-violet-200", title: "Git Commit", detail: "fix: activate venv before installing dependencies\n[ai-summarizer 3a7f21c]", action: null },
-    { time: "09:38", type: "fix", icon: CheckCircle2, color: "bg-emerald-600 text-white border-emerald-600", title: "Bug Fixed", detail: "ModuleNotFoundError resolved. main.py running successfully.", action: null, isFinal: true },
-  ];
+interface RecoveredSession {
+  id: string;
+  project: string;
+  projectLabel: string;
+  startTs: number;
+  endTs: number;
+  events: FlowSyncEvent[];
+  title: string;
+  topError?: string;
+  counts: { pages: number; files: number; errors: number };
+}
 
-  const handleCopy = (cmd: string, i: number) => {
-    setCopiedCmd(i);
-    setTimeout(() => setCopiedCmd(null), 2000);
+function buildRecoveredSessions(events: FlowSyncEvent[]): RecoveredSession[] {
+  const sorted = dedupeEvents(events).sort((a, b) => a.ts - b.ts);
+  const groups = new Map<string, FlowSyncEvent[]>();
+
+  for (const event of sorted) {
+    const key = `${event.project || "default"}|${localDayKey(event.ts)}`;
+    const group = groups.get(key);
+    if (group) group.push(event);
+    else groups.set(key, [event]);
+  }
+
+  const sessions: RecoveredSession[] = [];
+
+  const createSession = (groupEvents: FlowSyncEvent[]): void => {
+    if (groupEvents.length === 0) return;
+    const project = groupEvents[0].project || "default";
+    const projectLabel = project === "default" ? "Browsing" : project;
+    const startTs = groupEvents[0].ts;
+    const endTs = groupEvents[groupEvents.length - 1].ts;
+
+    const errorEvent = [...groupEvents]
+      .reverse()
+      .find((event) => event.type === "terminal.error" || event.type === "diagnostic.error");
+    const topErrorRaw = errorEvent
+      ? errorEvent.payload.errorMessage ||
+        errorEvent.payload.terminalOutput ||
+        (errorEvent.payload.command ? `Command failed: ${errorEvent.payload.command}` : "")
+      : "";
+    const topError = topErrorRaw ? shortenText(topErrorRaw, 72) : undefined;
+
+    const pageUrls = new Set<string>();
+    const files = new Set<string>();
+    let errors = 0;
+    for (const event of groupEvents) {
+      if (event.type === "tab.visit" && event.payload.url) {
+        pageUrls.add(sanitizeVisitUrl(event.payload.url));
+      }
+      if (event.type === "file.opened" && event.payload.fileName) {
+        files.add(event.payload.fileName);
+      }
+      if (event.type === "terminal.error" || event.type === "diagnostic.error") errors += 1;
+    }
+
+    sessions.push({
+      id: `${project}|${localDayKey(startTs)}|${startTs}`,
+      project,
+      projectLabel,
+      startTs,
+      endTs,
+      events: groupEvents,
+      title: topError ? `${projectLabel} — ${topError}` : `${projectLabel} — ${dayLabel(startTs)}`,
+      topError,
+      counts: { pages: pageUrls.size, files: files.size, errors },
+    });
   };
+
+  for (const groupEvents of groups.values()) {
+    let current: FlowSyncEvent[] = [];
+    for (const event of groupEvents) {
+      if (current.length > 0 && event.ts - current[current.length - 1].ts > SESSION_GAP_MS) {
+        createSession(current);
+        current = [];
+      }
+      current.push(event);
+    }
+    createSession(current);
+  }
+
+  return sessions.sort((a, b) => b.endTs - a.endTs);
+}
+
+function sessionTimelineEvents(session: RecoveredSession): FlowSyncEvent[] {
+  const filtered = session.events.filter((event) => TIMELINE_EVENT_TYPES.has(event.type));
+  return filtered.length > 0 ? filtered : session.events;
+}
+
+function TimelineScreen({ navigate }: { navigate: (s: Screen) => void }) {
+  const [events, setEvents] = useState<FlowSyncEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+    setLoading(true);
+    setLoadError(false);
+    void fetchEvents(500)
+      .then((list) => {
+        if (disposed) return;
+        setEvents(list);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (disposed) return;
+        setLoadError(true);
+        setLoading(false);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  const sessions = useMemo(() => buildRecoveredSessions(events), [events]);
+  const selected = sessions.find((session) => session.id === selectedId) ?? sessions[0] ?? null;
+  const timeline = selected ? sessionTimelineEvents(selected) : [];
 
   return (
     <DashboardLayout navigate={navigate} active="timeline">
@@ -946,75 +1353,157 @@ function TimelineScreen({ navigate }: { navigate: (s: Screen) => void }) {
                 <ChevronRight size={14} className="rotate-180" /> VS Code Extension
               </button>
               <span className="text-muted-foreground">/</span>
-              <span className="text-sm text-foreground">Recovered Session</span>
+              <span className="text-sm text-foreground">Recovered Sessions</span>
             </div>
-            <h1 className="text-xl sm:text-2xl font-bold text-foreground">Recovered Session Timeline</h1>
-            <p className="text-muted-foreground mt-1">AI Document Summarizer — 14 March 2026 — ModuleNotFoundError</p>
+            <h1 className="text-xl sm:text-2xl font-bold text-foreground">Recovered Sessions</h1>
+            <p className="text-muted-foreground mt-1">
+              {selected
+                ? `${selected.projectLabel} — ${dayLabel(selected.startTs)} — ${formatTime(selected.startTs)} to ${formatTime(selected.endTs)}`
+                : "Real sessions reconstructed from your captured events."}
+            </p>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            <Badge color="green">92% match</Badge>
+            {sessions.length > 0 && (
+              <Badge color="green">
+                {sessions.length} session{sessions.length === 1 ? "" : "s"}
+              </Badge>
+            )}
             <button className="flex items-center gap-2 border border-border bg-white text-sm font-medium text-foreground px-4 py-2 min-h-11 sm:min-h-0 rounded-xl hover:bg-gray-50 transition-colors">
               <Copy size={14} /> Export session
             </button>
           </div>
         </div>
 
-        <div className="max-w-2xl mx-auto">
-          <div className="space-y-0">
-            {events.map((event, i) => {
-              const Icon = event.icon;
-              const isLast = i === events.length - 1;
-              return (
-                <div key={i} className="flex gap-4 sm:gap-6">
-                  {/* Timeline spine */}
-                  <div className="flex flex-col items-center">
-                    <div className={`w-10 h-10 rounded-xl border-2 flex items-center justify-center flex-shrink-0 ${event.color} ${event.isFinal ? "shadow-lg shadow-emerald-100" : ""}`}>
-                      <Icon size={15} />
-                    </div>
-                    {!isLast && <div className="w-px flex-1 bg-border mt-1 mb-1 min-h-[2rem]" />}
-                  </div>
-
-                  {/* Content */}
-                  <div className={`flex-1 pb-8 ${isLast ? "pb-0" : ""}`}>
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-1">
-                          <span className="text-xs font-mono text-muted-foreground">{event.time}</span>
-                          <span className={`text-sm font-semibold ${event.isFinal ? "text-emerald-600" : "text-foreground"}`}>{event.title}</span>
-                        </div>
-                        <div className={`text-sm ${event.isFinal ? "text-emerald-600 font-medium" : "text-muted-foreground"} ${event.isCode ? "font-mono bg-gray-100 px-3 py-2 rounded-lg text-xs mt-2 break-all" : "mt-0.5"}`}>
-                          {event.detail}
-                        </div>
-                      </div>
-                      {event.action && (
-                        <button
-                          onClick={() => event.action?.type === "copy" ? handleCopy(event.action.cmd!, i) : undefined}
-                          className="flex items-center gap-1.5 text-xs font-medium text-primary bg-blue-50 border border-blue-200 px-3 py-3 sm:py-1.5 rounded-lg hover:bg-blue-100 transition-colors flex-shrink-0 mt-1"
-                        >
-                          {event.action.type === "copy" ? (copiedCmd === i ? <Check size={12} /> : <Copy size={12} />) : <ExternalLink size={12} />}
-                          {copiedCmd === i ? "Copied!" : event.action.label}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Developer insight */}
-          <Card className="mt-8 p-6 bg-blue-50 border-blue-200">
-            <div className="flex items-start gap-3">
-              <div className="w-8 h-8 rounded-xl bg-primary flex items-center justify-center flex-shrink-0">
-                <Info size={14} className="text-white" />
-              </div>
-              <div>
-                <div className="text-sm font-semibold text-foreground mb-1">Developer Insight</div>
-                <div className="text-sm text-muted-foreground italic">"Forgot to activate virtual environment before running pip install. The module installs globally instead of into the project venv."</div>
-              </div>
+        {loading ? (
+          <Card className="max-w-2xl mx-auto p-8 text-center text-sm text-muted-foreground">
+            Loading recovered sessions…
+          </Card>
+        ) : loadError ? (
+          <Card className="max-w-2xl mx-auto p-8 text-center">
+            <div className="text-sm text-muted-foreground mb-4">
+              Could not reach the FlowSync backend at /api/v1/events.
+            </div>
+            <button
+              onClick={() => {
+                setLoadError(false);
+                setLoading(true);
+                void fetchEvents(500)
+                  .then((list) => {
+                    setEvents(list);
+                    setLoading(false);
+                  })
+                  .catch(() => {
+                    setLoadError(true);
+                    setLoading(false);
+                  });
+              }}
+              className="inline-flex items-center gap-2 border border-border bg-white text-sm font-medium text-foreground px-4 py-2 rounded-xl hover:bg-gray-50 transition-colors"
+            >
+              <RefreshCw size={14} /> Retry
+            </button>
+          </Card>
+        ) : sessions.length === 0 ? (
+          <Card className="max-w-2xl mx-auto p-8 text-center">
+            <div className="text-sm font-medium text-foreground mb-1">No recovered sessions yet</div>
+            <div className="text-sm text-muted-foreground">
+              Sessions appear once Chrome and VS Code have captured real events.
             </div>
           </Card>
-        </div>
+        ) : (
+          <>
+            <Card className="max-w-2xl mx-auto mb-6 overflow-hidden">
+              <div className="px-5 py-4 border-b border-border flex items-center justify-between gap-3">
+                <h2 className="font-semibold text-foreground">Sessions</h2>
+                <span className="text-xs text-muted-foreground">Grouped by project and day · 30 min gap</span>
+              </div>
+              <div className="divide-y divide-border max-h-[300px] overflow-y-auto">
+                {sessions.map((session) => (
+                  <button
+                    key={session.id}
+                    onClick={() => setSelectedId(session.id)}
+                    className={`w-full text-left px-5 py-3 transition-colors hover:bg-gray-50 ${selected?.id === session.id ? "bg-blue-50" : ""}`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-foreground break-words">{session.title}</div>
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          {dayLabel(session.startTs)} · {formatTime(session.startTs)}–{formatTime(session.endTs)}
+                        </div>
+                      </div>
+                      <div className="text-right text-xs text-muted-foreground flex-shrink-0">
+                        <div>{session.counts.pages} pages · {session.counts.files} files</div>
+                        <div className={session.counts.errors > 0 ? "text-red-600 font-medium" : ""}>
+                          {session.counts.errors} error{session.counts.errors === 1 ? "" : "s"}
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </Card>
+
+            {selected && (
+              <div className="max-w-2xl mx-auto">
+                <Card className="mb-6 p-5">
+                  <div className="text-sm font-semibold text-foreground break-words">{selected.title}</div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    {selected.counts.pages} pages visited · {selected.counts.files} files opened ·{" "}
+                    {selected.counts.errors} terminal/diagnostic error{selected.counts.errors === 1 ? "" : "s"}
+                  </div>
+                </Card>
+
+                <div className="space-y-0">
+                  {timeline.map((event, i) => {
+                    const visual = timelineVisual(event);
+                    const Icon = visual.icon;
+                    const display = eventDisplay(event);
+                    const isLast = i === timeline.length - 1;
+                    const isError = event.type === "terminal.error" || event.type === "diagnostic.error";
+                    const url = event.type === "tab.visit" ? event.payload.url : undefined;
+                    return (
+                      <div key={eventKey(event)} className="flex gap-4 sm:gap-6">
+                        {/* Timeline spine */}
+                        <div className="flex flex-col items-center">
+                          <div className={`w-10 h-10 rounded-xl border-2 flex items-center justify-center flex-shrink-0 ${visual.color}`}>
+                            <Icon size={15} />
+                          </div>
+                          {!isLast && <div className="w-px flex-1 bg-border mt-1 mb-1 min-h-[2rem]" />}
+                        </div>
+
+                        {/* Content */}
+                        <div className={`flex-1 pb-8 ${isLast ? "pb-0" : ""}`}>
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-3 mb-1 flex-wrap">
+                                <span className="text-xs font-mono text-muted-foreground">{formatTime(event.ts)}</span>
+                                <span className={`text-sm font-semibold ${isError ? "text-red-600" : "text-foreground"} break-words`}>
+                                  {display.title}
+                                </span>
+                              </div>
+                              {display.detail && (
+                                <div className={`text-sm mt-0.5 break-words ${isError ? "text-red-600" : "text-muted-foreground"}`}>
+                                  {display.detail}
+                                </div>
+                              )}
+                            </div>
+                            {url && (
+                              <button
+                                onClick={() => window.open(url, "_blank", "noopener,noreferrer")}
+                                className="flex items-center gap-1.5 text-xs font-medium text-primary bg-blue-50 border border-blue-200 px-3 py-3 sm:py-1.5 rounded-lg hover:bg-blue-100 transition-colors flex-shrink-0 mt-1"
+                              >
+                                <ExternalLink size={12} /> Open link
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </DashboardLayout>
   );

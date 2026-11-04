@@ -5,23 +5,44 @@ node_modules/
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+*.p12
+*.jks
 
 # ---- Frontend build output (Vite) ----
 dist/
+build/
+*.local
+
+# ---- Chrome extension build ----
+extensions/chrome/dist/
+extensions/chrome/*.log
 
 # ---- Python / FastAPI ----
 __pycache__/
 *.py[cod]
+*.egg-info/
 .venv/
+venv/
+env/
+.python-version
 *.log
 backend/data/
 
 # ---- IDE / OS cruft ----
 .vscode/
+.idea/
+.DS_Store
 Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
 
 # ---- Logs & temp ----
 npm-debug.log*
 pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 *.tmp
 *.bak
