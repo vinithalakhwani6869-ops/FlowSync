@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   LayoutDashboard, FolderOpen, Clock, Shield, Settings,
-  ChevronRight, ExternalLink, Copy, Check, ArrowDown,
+  ChevronRight, ChevronDown, ExternalLink, Copy, Check, ArrowDown,
   Activity, Zap, Lock, Server, Database, GitBranch,
   Terminal, Globe, Code, FileText, AlertCircle,
   TrendingUp, Users, RefreshCw, CheckCircle2, XCircle,
   ToggleLeft, ToggleRight, Bell, Eye, EyeOff, Info,
-  ArrowRight, Play, Pause, Search
+  ArrowRight, Play, Pause, Search, LogOut
 } from "lucide-react";
 import {
   connectEvents, fetchEvents, fetchStats, formatDuration,
@@ -20,6 +20,17 @@ import type {
 import { Toaster, toast } from "sonner";
 import { Popover, PopoverContent, PopoverTrigger } from "./components/ui/popover";
 import { Calendar } from "./components/ui/calendar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./components/ui/dropdown-menu";
+import { AuthDialog } from "./components/auth/auth-dialog";
+import { useAuthSession } from "./lib/auth";
+import { supabase } from "./lib/supabase";
 
 type Screen = "landing" | "dashboard" | "capture" | "vscode" | "timeline" | "privacy" | "settings" | "architecture";
 
@@ -59,10 +70,29 @@ function Card({ children, className = "" }: { children: React.ReactNode; classNa
 
 function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
   const [copied, setCopied] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const { user, loading: authLoading } = useAuthSession();
+  const userEmail = user?.email ?? "";
+  const userInitial = (userEmail || "?").charAt(0).toUpperCase();
+
+  useEffect(() => {
+    if (authOpen && user) setAuthOpen(false);
+  }, [authOpen, user]);
 
   const handleCopy = () => {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleLogout = async () => {
+    if (!supabase || signingOut) return;
+    setSigningOut(true);
+    const { error } = await supabase.auth.signOut();
+    setSigningOut(false);
+    if (error) {
+      toast.error("Could not log out", { description: error.message });
+    }
   };
 
   const stats = [
@@ -101,10 +131,57 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
               ))}
             </nav>
           </div>
-          <div className="flex items-center gap-3">
-            <button className="hidden sm:block text-sm text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5">
-              Sign In
-            </button>
+          <div className="flex items-center gap-2 sm:gap-3">
+            {authLoading ? (
+              <div
+                aria-hidden="true"
+                className="h-9 w-16 animate-pulse rounded-lg bg-muted sm:w-28"
+              />
+            ) : user ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    aria-label={`Account menu for ${userEmail}`}
+                    className="flex min-h-11 items-center gap-2 rounded-lg border border-border bg-white px-2 py-1.5 text-sm text-foreground transition-colors hover:bg-gray-50 sm:min-h-0"
+                  >
+                    <span className="flex size-7 flex-shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-white">
+                      {userInitial}
+                    </span>
+                    <span className="hidden max-w-[10rem] truncate sm:inline">
+                      {userEmail}
+                    </span>
+                    <ChevronDown className="hidden size-4 text-muted-foreground sm:block" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel className="truncate">{userEmail}</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => navigate("dashboard")}>
+                    <LayoutDashboard className="size-4" />
+                    Open Dashboard
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    variant="destructive"
+                    disabled={signingOut}
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      void handleLogout();
+                    }}
+                  >
+                    <LogOut className="size-4" />
+                    {signingOut ? "Logging out…" : "Log out"}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <button
+                onClick={() => setAuthOpen(true)}
+                className="min-h-11 whitespace-nowrap px-2 py-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground sm:min-h-0 sm:px-3"
+              >
+                <span className="sm:hidden">Log in</span>
+                <span className="hidden sm:inline">Log in / Sign up</span>
+              </button>
+            )}
             <button
               onClick={() => navigate("dashboard")}
               className="text-sm font-medium bg-primary text-white px-3 sm:px-4 py-2 min-h-11 sm:min-h-0 rounded-lg hover:bg-blue-700 transition-colors flex-shrink-0"
@@ -114,6 +191,8 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
           </div>
         </div>
       </header>
+
+      <AuthDialog open={authOpen} onOpenChange={setAuthOpen} />
 
       {/* Hero */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 pt-14 sm:pt-20 pb-12 sm:pb-16">
@@ -965,7 +1044,11 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
                         {dateButtonLabel(selectedDay)}
                       </button>
                     </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="center" collisionPadding={8}>
+                    <PopoverContent
+                      className="w-auto max-w-[calc(100vw-1rem)] p-0"
+                      align="center"
+                      collisionPadding={8}
+                    >
                       <Calendar
                         mode="single"
                         selected={new Date(selectedDay)}
@@ -978,9 +1061,6 @@ function CaptureScreen({ navigate }: { navigate: (s: Screen) => void }) {
                         }}
                         fromDate={new Date(2020, 0, 1)}
                         toDate={new Date()}
-                        fromYear={2020}
-                        toYear={new Date().getFullYear()}
-                        captionLayout="dropdown"
                         disabled={{ after: new Date() }}
                         initialFocus
                       />
