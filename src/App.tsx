@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  LayoutDashboard, FolderOpen, Clock, Shield, Settings,
-  ChevronRight, ChevronDown, ExternalLink, Copy, Check, ArrowDown,
-  Activity, Zap, Lock, Server, Database, GitBranch,
+  LayoutDashboard, FolderOpen, Clock, Settings,
+  ChevronRight, ChevronDown, ExternalLink, Copy, ArrowDown,
+  Activity, Zap, Server, Database, GitBranch,
   Terminal, Globe, Code, FileText, AlertCircle,
   TrendingUp, Users, RefreshCw, CheckCircle2, XCircle,
   ToggleLeft, ToggleRight, Bell, Eye, EyeOff, Info,
@@ -29,17 +29,24 @@ import {
   DropdownMenuTrigger,
 } from "./components/ui/dropdown-menu";
 import { AuthDialog } from "./components/auth/auth-dialog";
+import { LandingNav } from "./components/landing/landing-nav";
+import {
+  ComingSoonSection,
+  FeatureSection,
+  HowItWorksSection,
+  PrivacySection,
+} from "./components/landing/landing-sections";
+import { ExtensionSetupDialog } from "./components/landing/extension-setup-dialog";
 import { useAuthSession } from "./lib/auth";
 import { supabase } from "./lib/supabase";
 
-type Screen = "landing" | "dashboard" | "capture" | "vscode" | "timeline" | "privacy" | "settings" | "architecture";
+type Screen = "landing" | "dashboard" | "capture" | "vscode" | "timeline" | "settings" | "architecture";
 
 const NAV_ITEMS: { id: Screen; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "capture", label: "Live Capture", icon: Activity },
   { id: "vscode", label: "VS Code Extension", icon: Code },
   { id: "timeline", label: "Recovered Sessions", icon: Clock },
-  { id: "privacy", label: "Privacy Center", icon: Shield },
   { id: "settings", label: "Settings", icon: Settings },
   { id: "architecture", label: "Architecture", icon: Server },
 ];
@@ -69,7 +76,7 @@ function Card({ children, className = "" }: { children: React.ReactNode; classNa
 // ─── LANDING ────────────────────────────────────────────────────────────────
 
 function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
-  const [copied, setCopied] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const { user, loading: authLoading } = useAuthSession();
@@ -79,11 +86,6 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
   useEffect(() => {
     if (authOpen && user) setAuthOpen(false);
   }, [authOpen, user]);
-
-  const handleCopy = () => {
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
 
   const handleLogout = async () => {
     if (!supabase || signingOut) return;
@@ -105,10 +107,6 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
   const integrations = [
     { name: "VS Code", icon: "⬛" },
     { name: "Chrome", icon: "🌐" },
-    { name: "GitHub", icon: "🐙" },
-    { name: "Git", icon: "🔀" },
-    { name: "Terminal", icon: "⌨️" },
-    { name: "Markdown", icon: "📝" },
   ];
 
   return (
@@ -121,15 +119,9 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
               <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center">
                 <Zap size={14} className="text-white" />
               </div>
-              <span className="font-semibold text-foreground text-[0.9375rem]">FlowSync</span>
+              <span className="hidden sm:inline font-semibold text-foreground text-[0.9375rem]">FlowSync</span>
             </div>
-            <nav className="hidden md:flex items-center gap-6">
-              {["Features", "How It Works", "Privacy", "Pricing", "Docs"].map((item) => (
-                <a key={item} href="#" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-                  {item}
-                </a>
-              ))}
-            </nav>
+            <LandingNav />
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
             {authLoading ? (
@@ -193,6 +185,7 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
       </header>
 
       <AuthDialog open={authOpen} onOpenChange={setAuthOpen} />
+      <ExtensionSetupDialog open={setupOpen} onOpenChange={setSetupOpen} />
 
       {/* Hero */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 pt-14 sm:pt-20 pb-12 sm:pb-16">
@@ -218,11 +211,11 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
                 <ArrowRight size={16} />
               </button>
               <button
-                onClick={handleCopy}
+                onClick={() => setSetupOpen(true)}
                 className="flex items-center justify-center w-full sm:w-auto gap-2 bg-white border border-border text-foreground px-6 py-3 rounded-xl font-medium hover:bg-gray-50 transition-colors"
               >
-                {copied ? <Check size={16} className="text-emerald-600" /> : <Globe size={16} />}
-                Install Chrome Extension
+                <Globe size={16} />
+                Chrome extension setup
               </button>
             </div>
           </div>
@@ -289,37 +282,25 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
         </div>
       </section>
 
+      {/* Features */}
+      <FeatureSection />
+
       {/* How it works */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 py-12 sm:py-20">
-        <div className="text-center mb-10 sm:mb-14">
-          <h2 className="text-3xl font-bold text-foreground mb-3">How FlowSync Works</h2>
-          <p className="text-muted-foreground max-w-xl mx-auto">Three layers that connect your entire debugging journey, automatically.</p>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {[
-            { step: "01", title: "Capture", desc: "Browser + IDE activity logged per session. Tabs, URLs, errors, terminal commands — everything recorded silently in the background.", icon: Activity, color: "text-blue-600 bg-blue-50" },
-            { step: "02", title: "Link", desc: "Correlated by timestamp and project context. FlowSync understands that the Stack Overflow tab and the VS Code error belong to the same session.", icon: GitBranch, color: "text-violet-600 bg-violet-50" },
-            { step: "03", title: "Retrieve", desc: "Relevant past context surfaced automatically when a similar error recurs. Not generated — reconstructed from your own history.", icon: RefreshCw, color: "text-emerald-600 bg-emerald-50" },
-          ].map((item) => {
-            const Icon = item.icon;
-            return (
-              <Card key={item.step} className="p-7 hover:shadow-md transition-shadow">
-                <div className={`w-11 h-11 rounded-xl flex items-center justify-center mb-5 ${item.color}`}>
-                  <Icon size={20} />
-                </div>
-                <div className="text-xs font-semibold text-muted-foreground mb-2 tracking-widest uppercase">{item.step}</div>
-                <h3 className="text-lg font-semibold text-foreground mb-3">{item.title}</h3>
-                <p className="text-sm text-muted-foreground leading-relaxed">{item.desc}</p>
-              </Card>
-            );
-          })}
-        </div>
-      </section>
+      <HowItWorksSection />
+
+      {/* Privacy */}
+      <PrivacySection />
+
+      {/* Pricing */}
+      <ComingSoonSection id="pricing" title="Pricing" />
+
+      {/* Docs */}
+      <ComingSoonSection id="docs" title="Docs" />
 
       {/* Integrations */}
       <section className="bg-white border-y border-border py-10 sm:py-14">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 text-center">
-          <p className="text-sm font-medium text-muted-foreground mb-8 uppercase tracking-widest">Works with your entire stack</p>
+          <p className="text-sm font-medium text-muted-foreground mb-8 uppercase tracking-widest">Works with the tools you already use</p>
           <div className="flex flex-wrap justify-center gap-8">
             {integrations.map((int) => (
               <div key={int.name} className="flex items-center gap-2.5 text-foreground font-medium">
@@ -409,6 +390,11 @@ function DashboardLayout({ children, navigate, active }: { children: React.React
   );
 }
 
+// These are capture fallbacks, not real project names. "default" is assigned to
+// every Chrome event by the extension; "unknown-workspace" is the VS Code
+// fallback when no workspace folder is open. Neither should appear as a project.
+const HIDDEN_PROJECT_NAMES = new Set(["default", "unknown-workspace"]);
+
 function DashboardScreen({ navigate }: { navigate: (s: Screen) => void }) {
   const [stats, setStats] = useState<FlowSyncStats | null>(null);
   const [recentEvents, setRecentEvents] = useState<FlowSyncEvent[]>([]);
@@ -428,13 +414,20 @@ function DashboardScreen({ navigate }: { navigate: (s: Screen) => void }) {
 
   const topSource =
     stats && Object.entries(stats.bySource).length > 0 ? Object.entries(stats.bySource)[0] : null;
-  const topProjects = stats ? Object.entries(stats.projects).slice(0, 2).map(([name]) => name) : [];
+  const projectNames = stats
+    ? Object.entries(stats.projects)
+        .filter(([name]) => !HIDDEN_PROJECT_NAMES.has(name))
+        .sort(
+          ([nameA, countA], [nameB, countB]) =>
+            countB - countA || nameA.localeCompare(nameB),
+        )
+        .map(([name]) => name)
+    : [];
 
   const overviewCards = [
     { label: "Contexts Recorded", value: stats ? String(stats.totalEvents) : "—", change: stats ? `+${stats.todayEvents} today` : "loading…", icon: RefreshCw, color: "text-primary bg-blue-50" },
     { label: "Hours Saved", value: stats ? formatHours(stats.dwellMs) : "—", change: stats ? `${Math.round(stats.dwellMs / 60000)} min of tracked activity` : "loading…", icon: Clock, color: "text-emerald-600 bg-emerald-50" },
     { label: "Pages Tracked", value: stats ? String(stats.distinctUrls) : "—", change: topSource ? `${topSource[0]} — ${topSource[1]} events` : "loading…", icon: TrendingUp, color: "text-violet-600 bg-violet-50" },
-    { label: "Projects Active", value: stats ? String(Object.keys(stats.projects).length) : "—", change: topProjects.length > 0 ? topProjects.join(", ") : "loading…", icon: FolderOpen, color: "text-amber-600 bg-amber-50" },
   ];
 
   const recentSessions = recentEvents.slice(0, 4).map((event) => ({
@@ -491,6 +484,32 @@ function DashboardScreen({ navigate }: { navigate: (s: Screen) => void }) {
               </Card>
             );
           })}
+          <Card className="p-5 hover:shadow-sm transition-shadow">
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center mb-4 text-amber-600 bg-amber-50">
+              <FolderOpen size={16} />
+            </div>
+            <div className="text-2xl font-bold text-foreground mb-1">
+              {stats ? String(projectNames.length) : "—"}
+            </div>
+            <div className="text-sm font-medium text-foreground mb-1">Projects Active</div>
+            {!stats ? (
+              <div className="text-xs text-muted-foreground">loading…</div>
+            ) : projectNames.length === 0 ? (
+              <div className="text-xs text-muted-foreground">No projects yet</div>
+            ) : (
+              <div className="flex flex-wrap gap-1 max-h-14 overflow-y-auto pr-1">
+                {projectNames.map((name) => (
+                  <span
+                    key={name}
+                    title={name}
+                    className="inline-block max-w-[9rem] truncate rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[0.6875rem] font-medium text-amber-700"
+                  >
+                    {name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </Card>
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -1691,117 +1710,6 @@ function TimelineScreen({ navigate }: { navigate: (s: Screen) => void }) {
   );
 }
 
-// ─── PRIVACY ─────────────────────────────────────────────────────────────────
-
-function PrivacyScreen({ navigate }: { navigate: (s: Screen) => void }) {
-  const [cloudSync, setCloudSync] = useState(false);
-
-  const principles = [
-    { title: "Local Processing", desc: "All capture and retrieval runs on-device. Nothing leaves your machine by default.", icon: Server, color: "text-primary bg-blue-50" },
-    { title: "Encrypted Storage", desc: "All session data is encrypted at rest using AES-256. Your SQLite database is protected.", icon: Lock, color: "text-violet-600 bg-violet-50" },
-    { title: "No Raw Code Uploaded", desc: "Only metadata required for retrieval is ever synced. Source code never leaves your machine.", icon: Code, color: "text-amber-600 bg-amber-50" },
-    { title: "Cloud Sync Disabled", desc: "Cloud sync is strictly opt-in. Turn it on only when you need cross-device continuity.", icon: Globe, color: "text-gray-600 bg-gray-100" },
-  ];
-
-  const privacyTimeline = [
-    { time: "Today 09:34", event: "Session captured — AI Document Summarizer", stored: "Local", shared: "None" },
-    { time: "Today 14:12", event: "Retrieval performed — Deepfake Detector", stored: "Local", shared: "None" },
-    { time: "Yesterday", event: "Session exported (manual)", stored: "Local", shared: "Local file" },
-    { time: "Jul 12", event: "Privacy audit — 0 issues found", stored: "—", shared: "—" },
-  ];
-
-  return (
-    <DashboardLayout navigate={navigate} active="privacy">
-      <div className="p-4 sm:p-6 md:p-8">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-0 sm:justify-between mb-6 sm:mb-8">
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-foreground">Privacy Center</h1>
-            <p className="text-muted-foreground mt-1">Everything FlowSync knows about you — and how it stays on your machine.</p>
-          </div>
-          <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-700 text-sm font-medium px-4 py-2 min-h-11 sm:min-h-0 rounded-xl">
-            <CheckCircle2 size={16} />
-            Security health: Excellent
-          </div>
-        </div>
-
-        {/* Principles */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-          {principles.map((p) => {
-            const Icon = p.icon;
-            return (
-              <Card key={p.title} className="p-6 flex items-start gap-4 hover:shadow-sm transition-shadow">
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${p.color}`}>
-                  <Icon size={18} />
-                </div>
-                <div>
-                  <div className="font-semibold text-foreground mb-1">{p.title}</div>
-                  <div className="text-sm text-muted-foreground leading-relaxed">{p.desc}</div>
-                </div>
-              </Card>
-            );
-          })}
-        </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          {/* Cloud sync toggle */}
-          <Card className="p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="font-semibold text-foreground">Cloud Sync</h2>
-              <Badge color={cloudSync ? "blue" : "gray"}>{cloudSync ? "Enabled" : "Disabled"}</Badge>
-            </div>
-            <div className="flex items-start gap-4 p-4 bg-background rounded-xl border border-border">
-              <div className="flex-1">
-                <div className="text-sm font-medium text-foreground mb-1">Optional Cloud Sync</div>
-                <div className="text-sm text-muted-foreground">Syncs only retrieval metadata across devices. Raw code and session content remain local only.</div>
-              </div>
-              <button
-                onClick={() => setCloudSync(!cloudSync)}
-                className={`relative w-11 h-6 rounded-full flex items-center transition-colors flex-shrink-0 mt-0.5 before:absolute before:-inset-2.5 before:content-[''] ${cloudSync ? "bg-primary justify-end" : "bg-gray-200 justify-start"}`}
-              >
-                <div className="w-5 h-5 rounded-full bg-white shadow mx-0.5" />
-              </button>
-            </div>
-            {cloudSync && (
-              <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700">
-                Only embedding metadata will sync. No source code, no raw session content.
-              </div>
-            )}
-          </Card>
-
-          {/* Privacy timeline */}
-          <Card className="overflow-hidden">
-            <div className="px-4 sm:px-6 py-4 border-b border-border">
-              <h2 className="font-semibold text-foreground">Privacy Timeline</h2>
-            </div>
-            <div className="divide-y divide-border">
-              {privacyTimeline.map((item) => (
-                <div key={item.time} className="px-4 sm:px-6 py-4">
-                  <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
-                    <div className="text-sm font-medium text-foreground min-w-0 break-words">{item.event}</div>
-                    <span className="text-xs text-muted-foreground flex-shrink-0 ml-3">{item.time}</span>
-                  </div>
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
-                    <span className="text-xs text-muted-foreground">Stored: <span className="font-medium text-foreground">{item.stored}</span></span>
-                    <span className="text-xs text-muted-foreground">Shared: <span className="font-medium text-foreground">{item.shared}</span></span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
-        </div>
-
-        {/* Trust statement */}
-        <Card className="mt-6 p-6 md:p-8 bg-blue-50 border-blue-100 text-center">
-          <div className="text-sm font-semibold text-primary mb-2 uppercase tracking-widest">Built on trust, not blind faith</div>
-          <p className="text-foreground font-medium max-w-xl mx-auto">
-            FlowSync only ever reconstructs things you already did — nothing to "trust," only to verify. Your own past work, surfaced when you need it.
-          </p>
-        </Card>
-      </div>
-    </DashboardLayout>
-  );
-}
-
 // ─── SETTINGS ────────────────────────────────────────────────────────────────
 
 const THEME_STORAGE_KEY = "flowsync:theme";
@@ -2813,7 +2721,6 @@ export default function App() {
       {screen === "capture" && <CaptureScreen navigate={navigate} />}
       {screen === "vscode" && <VSCodeScreen navigate={navigate} />}
       {screen === "timeline" && <TimelineScreen navigate={navigate} />}
-      {screen === "privacy" && <PrivacyScreen navigate={navigate} />}
       {screen === "settings" && <SettingsScreen navigate={navigate} />}
       {screen === "architecture" && <ArchitectureScreen navigate={navigate} />}
     </div>

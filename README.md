@@ -67,7 +67,6 @@ FlowSync fixes this by watching the gaps between your tools silently.
 | **Live Capture** | Real-time activity feed showing captured events during a debugging session |
 | **VS Code Extension** | Mockup of the in-editor FlowSync panel with match confidence and recovered knowledge |
 | **Recovered Sessions** | Timeline view of a past debugging session with recovered commands and links |
-| **Privacy Center** | Data handling principles, cloud sync controls, and privacy audit log |
 | **Settings** | Capture preferences, appearance, and keyboard shortcuts |
 | **Architecture** | System diagram showing the full pipeline from input to retrieval |
 
