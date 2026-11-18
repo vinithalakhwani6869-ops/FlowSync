@@ -276,6 +276,44 @@ def list_events(
     return [_row_to_event(row) for row in rows]
 
 
+# Chrome events carry project "default" and VS Code uses "unknown-workspace" when
+# no folder is open. Neither is a real project, so they are never listed.
+PLACEHOLDER_PROJECTS = ("default", "unknown-workspace")
+
+
+def project_activity(window_days: int = 30) -> list[dict[str, Any]]:
+    """Distinct real projects with activity in the last ``window_days`` days.
+
+    Returns each project's event count and most recent event timestamp, newest
+    activity first. Placeholder project names are excluded, never deleted.
+    """
+    init_db()
+    cutoff_ms = int(time.time() * 1000) - max(1, int(window_days)) * 24 * 60 * 60 * 1000
+    placeholders = ",".join("?" for _ in PLACEHOLDER_PROJECTS)
+    with _connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT project, COUNT(*) AS event_count, MAX(ts) AS last_event_ts
+            FROM events
+            WHERE ts >= ?
+              AND project IS NOT NULL
+              AND TRIM(project) <> ''
+              AND LOWER(TRIM(project)) NOT IN ({placeholders})
+            GROUP BY project
+            ORDER BY last_event_ts DESC, event_count DESC
+            """,
+            (cutoff_ms, *PLACEHOLDER_PROJECTS),
+        ).fetchall()
+    return [
+        {
+            "project": row["project"],
+            "event_count": int(row["event_count"]),
+            "last_event_ts": int(row["last_event_ts"]),
+        }
+        for row in rows
+    ]
+
+
 def delete_events_older_than(days: int) -> int:
     """Delete events older than ``days`` and return the number of rows removed."""
     init_db()

@@ -2,14 +2,15 @@ import type { ReactNode } from "react";
 import {
   Activity,
   Clock,
-  Code,
   Database,
+  EyeOff,
   GitBranch,
   Globe,
-  LayoutDashboard,
   Lock,
   RefreshCw,
+  Search,
   Server,
+  Settings,
   Shield,
   Sparkles,
   Timer,
@@ -30,69 +31,74 @@ function SectionCard({
   );
 }
 
+function ComingSoonBadge() {
+  return (
+    <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[0.6875rem] font-medium text-amber-700">
+      Coming soon
+    </span>
+  );
+}
+
 interface Feature {
   title: string;
   description: string;
   icon: LucideIcon;
   color: string;
+  comingSoon?: boolean;
 }
 
 const FEATURES: Feature[] = [
   {
-    title: "Silent browser capture",
+    title: "Silent capture",
     description:
-      "The Chrome extension records the URL, page title, dwell time and visit count for tabs on the domains you allow. Everything runs in the background.",
+      "The Chrome and VS Code extensions log the pages you visit, time spent on each, the files you open, editor diagnostics and failed terminal commands — quietly in the background.",
     icon: Globe,
     color: "text-blue-600 bg-blue-50",
   },
   {
-    title: "Editor capture",
+    title: "Live activity feed",
     description:
-      "The VS Code extension records the files you open, error diagnostics, failed terminal commands with their output, and how long you stayed stuck.",
-    icon: Code,
-    color: "text-violet-600 bg-violet-50",
+      "Watch events arrive in real time in Live Capture and step back through any day with the calendar picker.",
+    icon: Activity,
+    color: "text-emerald-600 bg-emerald-50",
   },
   {
     title: "Recovered sessions",
     description:
-      "Captured events are grouped into sessions by project and day, with a 30-minute inactivity gap. Replay the pages, files and errors in order.",
+      "Past work rebuilt from your own activity, grouped by project and day, with a 30-minute inactivity gap splitting separate sessions.",
     icon: RefreshCw,
-    color: "text-emerald-600 bg-emerald-50",
+    color: "text-violet-600 bg-violet-50",
   },
   {
-    title: "Stuck detection",
+    title: "Error memory",
     description:
-      "If you stop working while an error is still unresolved, FlowSync records a stuck-session event after the idle threshold you set (4 minutes by default).",
-    icon: Timer,
+      "Recognise when you have seen an error before by matching it against your own captured history.",
+    icon: Search,
     color: "text-amber-600 bg-amber-50",
+    comingSoon: true,
   },
   {
-    title: "Secret redaction",
+    title: "AI fix suggestions",
     description:
-      "Tokens, API keys and password values are stripped from captured error and command text before it reaches your backend. Redaction is on by default.",
-    icon: Lock,
-    color: "text-red-600 bg-red-100",
+      "Explain an error from your recent context and propose a fix as a diff you review and approve. Nothing is applied or run automatically, and it is off by default.",
+    icon: Sparkles,
+    color: "text-blue-600 bg-blue-50",
+    comingSoon: true,
   },
   {
-    title: "Local storage",
+    title: "Welcome-back briefing",
     description:
-      "Captured events go to the FlowSync backend you run yourself, in a local SQLite database. There is no cloud sync and no third-party event service.",
-    icon: Database,
-    color: "text-gray-600 bg-gray-100",
+      "After time away, a short summary of where you left off, what was failing and where to start.",
+    icon: Timer,
+    color: "text-violet-600 bg-violet-50",
+    comingSoon: true,
   },
   {
-    title: "Your data controls",
+    title: "Privacy controls",
     description:
-      "Pause capture, add or remove allowed browser domains, see the backend retention window, and export or delete every event from Settings.",
+      "Pause or resume capture, manage allowed browser domains, redact secrets from terminal output, and keep a retention window on stored events.",
     icon: Shield,
     color: "text-emerald-600 bg-emerald-50",
-  },
-  {
-    title: "Dashboard and live feed",
-    description:
-      "See capture stats, active projects, recent sessions and recent pages in the dashboard, plus a live event feed in Live Capture. Error events can also raise in-app toasts.",
-    icon: LayoutDashboard,
-    color: "text-violet-600 bg-violet-50",
   },
 ];
 
@@ -107,8 +113,8 @@ export function FeatureSection() {
           What FlowSync does
         </h2>
         <p className="text-muted-foreground max-w-2xl mx-auto">
-          Concrete capture and recovery features that are working today. No
-          model provider is required.
+          Capture, recovery and privacy controls that work today. Cards marked
+          “Coming soon” are not built yet.
         </p>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -124,9 +130,12 @@ export function FeatureSection() {
               >
                 <Icon size={20} />
               </div>
-              <h3 className="text-lg font-semibold text-foreground mb-2">
-                {feature.title}
-              </h3>
+              <div className="flex items-center gap-2 flex-wrap mb-2">
+                <h3 className="text-lg font-semibold text-foreground">
+                  {feature.title}
+                </h3>
+                {feature.comingSoon && <ComingSoonBadge />}
+              </div>
               <p className="text-sm text-muted-foreground leading-relaxed">
                 {feature.description}
               </p>
@@ -143,7 +152,7 @@ const HOW_IT_WORKS_STEPS: (Feature & { step: string; badge?: string })[] = [
     step: "01",
     title: "Capture",
     description:
-      "Browser + IDE activity logged per session. Tabs, URLs, errors and terminal commands are recorded silently in the background.",
+      "Browser + IDE activity logged per session. Tabs, URLs, errors, terminal commands — everything recorded silently in the background.",
     icon: Activity,
     color: "text-blue-600 bg-blue-50",
   },
@@ -151,7 +160,7 @@ const HOW_IT_WORKS_STEPS: (Feature & { step: string; badge?: string })[] = [
     step: "02",
     title: "Link",
     description:
-      "Grouped by timestamp, project and day. Pages, files and errors from the same work session are kept together.",
+      "Correlated by timestamp and project context. FlowSync understands that the Stack Overflow tab and the VS Code error belong to the same session.",
     icon: GitBranch,
     color: "text-violet-600 bg-violet-50",
   },
@@ -159,18 +168,18 @@ const HOW_IT_WORKS_STEPS: (Feature & { step: string; badge?: string })[] = [
     step: "03",
     title: "Retrieve",
     description:
-      "Your own past sessions, rebuilt from captured events. See the pages, files and errors that led to a fix — not generated content.",
+      "Relevant past context surfaced automatically when a similar error recurs. Not generated — reconstructed from your own history.",
     icon: RefreshCw,
     color: "text-emerald-600 bg-emerald-50",
   },
   {
     step: "04",
-    title: "Assist",
+    title: "Fix",
     description:
-      "Planned: use your history and the pages you were reading to propose a fix as a diff you approve.",
+      "When an error hits, FlowSync's AI uses your own history, including the docs you were reading, to explain it and propose a fix. You review the diff and approve. Nothing is applied or run without you.",
     icon: Sparkles,
     color: "text-amber-600 bg-amber-50",
-    badge: "Not available yet",
+    badge: "Coming soon",
   },
 ];
 
@@ -185,11 +194,11 @@ export function HowItWorksSection() {
           How FlowSync Works
         </h2>
         <p className="text-muted-foreground max-w-xl mx-auto">
-          Three layers that connect your debugging journey, plus an assist step
+          Three steps that connect your debugging journey, plus an AI fix step
           that is still in development.
         </p>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         {HOW_IT_WORKS_STEPS.map((item) => {
           const Icon = item.icon;
           return (
@@ -209,11 +218,7 @@ export function HowItWorksSection() {
                 <h3 className="text-lg font-semibold text-foreground">
                   {item.title}
                 </h3>
-                {item.badge && (
-                  <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[0.6875rem] font-medium text-amber-700">
-                    {item.badge}
-                  </span>
-                )}
+                {item.badge && <ComingSoonBadge />}
               </div>
               <p className="text-sm text-muted-foreground leading-relaxed">
                 {item.description}
@@ -230,6 +235,7 @@ interface PrivacyCard {
   title: string;
   icon: LucideIcon;
   color: string;
+  comingSoon?: boolean;
   body: ReactNode;
 }
 
@@ -239,31 +245,40 @@ const PRIVACY_CARDS: PrivacyCard[] = [
     icon: Globe,
     color: "text-blue-600 bg-blue-50",
     body: (
+      <p>
+        Chrome records the URL, page title and time spent on each allowed page.
+        VS Code records file names and languages, editor diagnostics, failed
+        terminal commands with their output, and how long a session stayed
+        stuck.
+      </p>
+    ),
+  },
+  {
+    title: "What is never captured",
+    icon: EyeOff,
+    color: "text-red-600 bg-red-100",
+    body: (
       <>
         <p>
-          Chrome records the URL, page title, dwell time and visit count — only
-          for domains on your allowed list. VS Code records file names,
-          language, error messages, failed command text, terminal output and
-          stuck-session timing.
+          Page content, form inputs, keystrokes, passwords and the contents of
+          your files are not read or stored.
         </p>
-        <p className="mt-3 text-foreground font-medium">Never captured:</p>
-        <p>
-          Page content, form inputs, keystrokes, passwords, or the contents of
-          your source files.
+        <p className="mt-3">
+          Links shown in the app have their query parameters and fragments
+          removed.
         </p>
       </>
     ),
   },
   {
-    title: "Where data is stored",
-    icon: Database,
-    color: "text-gray-600 bg-gray-100",
+    title: "Browser domain allowlist",
+    icon: Shield,
+    color: "text-emerald-600 bg-emerald-50",
     body: (
       <p>
-        Events are written to a SQLite database on the FlowSync backend you run
-        yourself (<span className="font-mono text-xs">backend/data/flowsync.db</span>).
-        Cloud sync does not exist, and captured events are not sent to a
-        third-party service.
+        Chrome only records pages on your allowed developer domains. The list
+        ships with common developer sites, and you can add or remove domains in
+        Settings.
       </p>
     ),
   },
@@ -273,55 +288,65 @@ const PRIVACY_CARDS: PrivacyCard[] = [
     color: "text-violet-600 bg-violet-50",
     body: (
       <p>
-        With <span className="font-medium text-foreground">Redact secrets</span>{" "}
-        on (the default), the VS Code extension strips bearer tokens, common API
-        keys, password values, and long hex or base64-like strings from error
-        and command text before it is sent to your backend.
+        The VS Code extension strips bearer tokens, common API keys, password
+        values and long secret-like strings from terminal output and error text
+        before it is stored. Redaction is on by default.
       </p>
     ),
   },
   {
-    title: "Retention",
-    icon: Clock,
-    color: "text-emerald-600 bg-emerald-50",
+    title: "Local storage and retention",
+    icon: Database,
+    color: "text-gray-600 bg-gray-100",
     body: (
       <p>
-        The backend deletes events older than{" "}
-        <span className="font-mono text-xs">RETENTION_DAYS</span>, which defaults
-        to 30 days. Cleanup runs once every 24 hours.
+        Events are stored in the FlowSync backend database you run yourself.
+        There is no cloud sync. A retention window — 30 days by default, set by
+        the backend's <span className="font-mono text-xs">RETENTION_DAYS</span>{" "}
+        — deletes older raw events.
+      </p>
+    ),
+  },
+  {
+    title: "Access control",
+    icon: Server,
+    color: "text-amber-600 bg-amber-50",
+    body: (
+      <p>
+        Writing events and reading settings, export and delete all require an
+        API key. Cross-origin requests are limited to the origins you configure.
       </p>
     ),
   },
   {
     title: "AI and your data",
-    icon: Server,
-    color: "text-amber-600 bg-amber-50",
+    icon: Sparkles,
+    color: "text-blue-600 bg-blue-50",
+    comingSoon: true,
     body: (
       <p>
-        No AI model is called. Generation is off, no provider is configured, and
-        captured events are not sent to a model provider.
+        AI is off by default. When it ships and you enable it, an error's text,
+        the trimmed code around it and recent activity titles would be sent to
+        the AI provider only when you click a button for that request. Fixes are
+        shown as a diff and never applied or run automatically. Secrets,{" "}
+        <span className="font-mono text-xs">.env</span> files and ignored files
+        are never sent.
       </p>
     ),
   },
   {
     title: "Your control",
-    icon: Shield,
+    icon: Settings,
     color: "text-emerald-600 bg-emerald-50",
     body: (
-      <>
-        <p>
-          Pause capture, manage allowed browser domains, and toggle redaction in
-          Settings. Export every event as JSON or permanently delete all events
-          from{" "}
-          <span className="font-medium text-foreground">
-            Settings → Cloud Sync
-          </span>
-          .
-        </p>
-        <p className="mt-3">
-          FlowSync never edits your code or runs a command on its own.
-        </p>
-      </>
+      <p>
+        Pause or resume capture and adjust capture toggles in Settings. Export
+        every event as JSON or permanently delete all events from{" "}
+        <span className="font-medium text-foreground">
+          Settings → Cloud Sync
+        </span>
+        .
+      </p>
     ),
   },
 ];
@@ -335,8 +360,8 @@ export function PrivacySection() {
       <div className="text-center mb-10 sm:mb-14">
         <h2 className="text-3xl font-bold text-foreground mb-3">Privacy</h2>
         <p className="text-muted-foreground max-w-2xl mx-auto">
-          FlowSync is local-first. Here is exactly what it records, where it
-          goes, and what you can control.
+          FlowSync is local-first. Here is what it records, where it goes, and
+          what you control.
         </p>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -349,15 +374,23 @@ export function PrivacySection() {
               >
                 <Icon size={18} />
               </div>
-              <h3 className="font-semibold text-foreground mb-2">
-                {card.title}
-              </h3>
+              <div className="flex items-center gap-2 flex-wrap mb-2">
+                <h3 className="font-semibold text-foreground">{card.title}</h3>
+                {card.comingSoon && <ComingSoonBadge />}
+              </div>
               <div className="text-sm text-muted-foreground leading-relaxed space-y-1">
                 {card.body}
               </div>
             </SectionCard>
           );
         })}
+      </div>
+
+      <div className="mt-6 max-w-3xl mx-auto border border-border rounded-2xl p-6 sm:p-8 text-center">
+        <p className="text-foreground font-medium">
+          FlowSync reconstructs work you already did — your own past activity,
+          surfaced when you need it.
+        </p>
       </div>
     </section>
   );

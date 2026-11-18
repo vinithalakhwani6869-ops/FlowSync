@@ -9,12 +9,12 @@ import {
   ArrowRight, Play, Pause, Search, LogOut
 } from "lucide-react";
 import {
-  connectEvents, fetchEvents, fetchStats, formatDuration,
+  connectEvents, fetchEvents, fetchStats, fetchProjects, formatDuration,
   formatHours, formatIdle, formatRelative, formatTime,
   fetchSettings, updateSettings, fetchMeta, exportData, deleteAllData, downloadJson,
 } from "./lib/flowsync";
 import type {
-  FlowSyncEvent, FlowSyncStats, LiveConnectionStatus,
+  FlowSyncEvent, FlowSyncStats, FlowSyncProject, LiveConnectionStatus,
   FlowSyncSettings, SettingsPatch, FlowSyncMeta,
 } from "./lib/flowsync";
 import { Toaster, toast } from "sonner";
@@ -193,7 +193,7 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
           <div>
             <div className="inline-flex items-center gap-2 bg-blue-50 border border-blue-100 text-blue-700 text-xs font-medium px-3 py-1.5 rounded-full mb-6">
               <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
-              Developer memory layer — not another AI assistant
+              Developer memory layer - not another AI assistant
             </div>
             <h1 className="text-[2rem] md:text-[3.25rem] font-bold text-foreground leading-[1.1] tracking-tight mb-6">
               FlowSync reconstructs the exact path that led to your fix -{" "}
@@ -398,6 +398,11 @@ const HIDDEN_PROJECT_NAMES = new Set(["default", "unknown-workspace"]);
 function DashboardScreen({ navigate }: { navigate: (s: Screen) => void }) {
   const [stats, setStats] = useState<FlowSyncStats | null>(null);
   const [recentEvents, setRecentEvents] = useState<FlowSyncEvent[]>([]);
+  // "Active" projects come from the dedicated endpoint, which counts distinct
+  // real projects (placeholder names excluded) over a 30-day window. If that
+  // request fails we fall back to the all-time counts in stats.
+  const [projects, setProjects] = useState<FlowSyncProject[] | null>(null);
+  const [projectsSettled, setProjectsSettled] = useState(false);
 
   useEffect(() => {
     let disposed = false;
@@ -407,6 +412,16 @@ function DashboardScreen({ navigate }: { navigate: (s: Screen) => void }) {
     void fetchEvents(20).then((value) => {
       if (!disposed) setRecentEvents(value);
     });
+    void fetchProjects(30)
+      .then((value) => {
+        if (!disposed) setProjects(value);
+      })
+      .catch(() => {
+        if (!disposed) setProjects(null);
+      })
+      .finally(() => {
+        if (!disposed) setProjectsSettled(true);
+      });
     return () => {
       disposed = true;
     };
@@ -414,7 +429,9 @@ function DashboardScreen({ navigate }: { navigate: (s: Screen) => void }) {
 
   const topSource =
     stats && Object.entries(stats.bySource).length > 0 ? Object.entries(stats.bySource)[0] : null;
-  const projectNames = stats
+  // Fallback list from the all-time stats counts, used only if the projects
+  // endpoint is unavailable. Placeholder names are never shown.
+  const statsProjectNames = stats
     ? Object.entries(stats.projects)
         .filter(([name]) => !HIDDEN_PROJECT_NAMES.has(name))
         .sort(
@@ -423,6 +440,12 @@ function DashboardScreen({ navigate }: { navigate: (s: Screen) => void }) {
         )
         .map(([name]) => name)
     : [];
+  const projectList =
+    projects !== null
+      ? projects.map((entry) => ({ name: entry.project, lastEventTs: entry.last_event_ts }))
+      : statsProjectNames.map((name) => ({ name, lastEventTs: null as number | null }));
+  const projectNames = projectList.map((entry) => entry.name);
+  const projectsReady = projectsSettled || stats !== null;
 
   const overviewCards = [
     { label: "Contexts Recorded", value: stats ? String(stats.totalEvents) : "—", change: stats ? `+${stats.todayEvents} today` : "loading…", icon: RefreshCw, color: "text-primary bg-blue-50" },
@@ -489,22 +512,28 @@ function DashboardScreen({ navigate }: { navigate: (s: Screen) => void }) {
               <FolderOpen size={16} />
             </div>
             <div className="text-2xl font-bold text-foreground mb-1">
-              {stats ? String(projectNames.length) : "—"}
+              {projectsReady ? String(projectNames.length) : "—"}
             </div>
             <div className="text-sm font-medium text-foreground mb-1">Projects Active</div>
-            {!stats ? (
+            {!projectsReady ? (
               <div className="text-xs text-muted-foreground">loading…</div>
             ) : projectNames.length === 0 ? (
-              <div className="text-xs text-muted-foreground">No projects yet</div>
+              <div className="text-xs text-muted-foreground leading-snug">
+                No projects yet. Open a folder in VS Code and FlowSync will pick it up.
+              </div>
             ) : (
               <div className="flex flex-wrap gap-1 max-h-14 overflow-y-auto pr-1">
-                {projectNames.map((name) => (
+                {projectList.map((entry) => (
                   <span
-                    key={name}
-                    title={name}
+                    key={entry.name}
+                    title={
+                      entry.lastEventTs
+                        ? `${entry.name} — last active ${formatRelative(entry.lastEventTs)}`
+                        : entry.name
+                    }
                     className="inline-block max-w-[9rem] truncate rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[0.6875rem] font-medium text-amber-700"
                   >
-                    {name}
+                    {entry.name}
                   </span>
                 ))}
               </div>

@@ -101,6 +101,23 @@ export async function fetchStats(): Promise<FlowSyncStats> {
   return getJson<FlowSyncStats>("/api/v1/events/stats");
 }
 
+export interface FlowSyncProject {
+  project: string;
+  event_count: number;
+  last_event_ts: number;
+}
+
+// Distinct real projects with activity inside the window. The backend already
+// drops placeholder project names ("default", "unknown-workspace") and empty
+// names, so callers never have to filter them out.
+export async function fetchProjects(days = 30): Promise<FlowSyncProject[]> {
+  const params = new URLSearchParams({ days: String(days) });
+  const body = await getJson<{ projects: FlowSyncProject[] }>(
+    `/api/v1/projects?${params.toString()}`,
+  );
+  return body.projects;
+}
+
 function authHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     accept: "application/json",

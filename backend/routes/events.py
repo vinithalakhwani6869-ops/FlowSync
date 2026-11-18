@@ -124,6 +124,13 @@ def get_events(
     }
 
 
+@router.get("/api/v1/projects")
+def get_projects(
+    days: int = Query(30, ge=1, le=3650),
+) -> dict[str, list[dict[str, Any]]]:
+    return {"projects": database.project_activity(window_days=days)}
+
+
 @router.websocket("/ws/events")
 async def ws_events(
     websocket: WebSocket,
