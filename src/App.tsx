@@ -42,6 +42,8 @@ import { supabase } from "./lib/supabase";
 
 type Screen = "landing" | "dashboard" | "capture" | "vscode" | "timeline" | "settings" | "architecture";
 
+const AUTH_ENABLED = import.meta.env.VITE_ENABLE_AUTH === "true";
+
 const NAV_ITEMS: { id: Screen; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "capture", label: "Live Capture", icon: Activity },
@@ -98,10 +100,10 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
   };
 
   const stats = [
-    { value: "83%", label: "Average recovery time reduced" },
-    { value: "12,400+", label: "Recovered sessions" },
-    { value: "3,200+", label: "Projects protected" },
-    { value: "94.7%", label: "Retrieval accuracy" },
+    { value: "2 sources", label: "Chrome + VS Code, one timeline" },
+    { value: "30 days", label: "Default retention window" },
+    { value: "AI off", label: "No model configured today" },
+    { value: "30 min", label: "Session split gap" },
   ];
 
   const integrations = [
@@ -124,7 +126,7 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
             <LandingNav />
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
-            {authLoading ? (
+            {AUTH_ENABLED && (authLoading ? (
               <div
                 aria-hidden="true"
                 className="h-9 w-16 animate-pulse rounded-lg bg-muted sm:w-28"
@@ -173,7 +175,7 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
                 <span className="sm:hidden">Log in</span>
                 <span className="hidden sm:inline">Log in / Sign up</span>
               </button>
-            )}
+            ))}
             <button
               onClick={() => navigate("dashboard")}
               className="text-sm font-medium bg-primary text-white px-3 sm:px-4 py-2 min-h-11 sm:min-h-0 rounded-lg hover:bg-blue-700 transition-colors flex-shrink-0"
@@ -184,7 +186,7 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
         </div>
       </header>
 
-      <AuthDialog open={authOpen} onOpenChange={setAuthOpen} />
+      {AUTH_ENABLED && <AuthDialog open={authOpen} onOpenChange={setAuthOpen} />}
       <ExtensionSetupDialog open={setupOpen} onOpenChange={setSetupOpen} />
 
       {/* Hero */}
@@ -323,7 +325,7 @@ function LandingScreen({ navigate }: { navigate: (s: Screen) => void }) {
           Open Dashboard 
           <ArrowRight size={18} />
         </button>
-        <p className="text-xs text-muted-foreground mt-4">No account required. Local-first by default.</p>
+        <p className="text-xs text-muted-foreground mt-4">No account required. Your data stays in your own FlowSync backend.</p>
       </section>
     </div>
   );
@@ -1282,7 +1284,7 @@ function VSCodeScreen({ navigate }: { navigate: (s: Screen) => void }) {
         {/* VS Code mockup */}
         <div className="rounded-2xl overflow-x-auto md:overflow-hidden border border-gray-300 shadow-2xl shadow-gray-200">
           {/* Title bar */}
-          <div className="bg-[#1e1e2e] px-4 py-2.5 flex items-center gap-3">
+          <div className="bg-[#1e1e2e] dark:bg-black px-4 py-2.5 flex items-center gap-3">
             <div className="flex gap-1.5">
               <div className="w-3 h-3 rounded-full bg-[#ff5f56]" />
               <div className="w-3 h-3 rounded-full bg-[#ffbd2e]" />
@@ -1292,12 +1294,12 @@ function VSCodeScreen({ navigate }: { navigate: (s: Screen) => void }) {
           </div>
 
           {/* Editor body */}
-          <div className="bg-[#1e1e2e] flex min-w-[640px] md:min-w-0" style={{ height: "520px" }}>
+          <div className="bg-[#1e1e2e] dark:bg-black flex min-w-[640px] md:min-w-0" style={{ height: "520px" }}>
             {/* File tree */}
-            <div className="w-44 border-r border-[#2d2d3e] p-2 flex-shrink-0 bg-[#252535]">
+            <div className="w-44 border-r border-[#2d2d3e] dark:border-[#1E40AF] p-2 flex-shrink-0 bg-[#252535] dark:bg-black">
               <div className="text-[0.625rem] text-gray-500 uppercase tracking-widest px-2 mb-2">Explorer</div>
               {["📁 ai-summarizer", "  📄 main.py", "  📄 utils.py", "  📄 config.py", "  📁 tests", "📁 models", "📄 requirements.txt"].map((f, i) => (
-                <div key={i} className={`text-xs font-mono px-2 py-1 rounded cursor-pointer ${f.includes("main.py") ? "bg-[#2563EB]/30 text-blue-300" : "text-gray-400 hover:bg-[#2d2d3e]"}`}>
+                <div key={i} className={`text-xs font-mono px-2 py-1 rounded cursor-pointer ${f.includes("main.py") ? "bg-[#2563EB]/30 dark:bg-black text-blue-300" : "text-gray-400 hover:bg-[#2d2d3e]"}`}>
                   {f}
                 </div>
               ))}
@@ -1306,8 +1308,8 @@ function VSCodeScreen({ navigate }: { navigate: (s: Screen) => void }) {
             {/* Code area */}
             <div className="flex-1 flex flex-col">
               {/* Tabs */}
-              <div className="flex bg-[#252535] border-b border-[#2d2d3e]">
-                <div className="px-4 py-2 text-xs font-mono text-blue-300 bg-[#1e1e2e] border-r border-[#2d2d3e] border-t-2 border-t-blue-500">
+              <div className="flex bg-[#252535] dark:bg-black border-b border-[#2d2d3e] dark:border-[#1E40AF]">
+                <div className="px-4 py-2 text-xs font-mono text-blue-300 bg-[#1e1e2e] dark:bg-black border-r border-[#2d2d3e] dark:border-[#1E40AF] border-t-2 border-t-blue-500">
                   main.py
                 </div>
               </div>
@@ -1342,8 +1344,8 @@ function VSCodeScreen({ navigate }: { navigate: (s: Screen) => void }) {
 
                 {/* FlowSync sidebar */}
                 {showPanel && (
-                  <div className="w-72 border-l border-[#2d2d3e] bg-[#252535] flex flex-col flex-shrink-0">
-                    <div className="px-4 py-3 border-b border-[#2d2d3e] flex items-center justify-between">
+                  <div className="w-72 border-l border-[#2d2d3e] dark:border-[#1E40AF] bg-[#252535] dark:bg-black flex flex-col flex-shrink-0">
+                    <div className="px-4 py-3 border-b border-[#2d2d3e] dark:border-[#1E40AF] flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <div className="w-5 h-5 rounded bg-primary flex items-center justify-center">
                           <Zap size={11} className="text-white" />
@@ -1392,7 +1394,7 @@ function VSCodeScreen({ navigate }: { navigate: (s: Screen) => void }) {
                       </div>
 
                       {/* Recovery time */}
-                      <div className="bg-[#1e1e2e] rounded-xl p-3 space-y-2">
+                      <div className="bg-[#1e1e2e] dark:bg-black rounded-xl p-3 space-y-2">
                         <div className="text-[0.6875rem] uppercase tracking-widest text-gray-500">Estimated Recovery</div>
                         <div className="flex items-end justify-between">
                           <div>
@@ -1407,7 +1409,7 @@ function VSCodeScreen({ navigate }: { navigate: (s: Screen) => void }) {
                       </div>
                     </div>
 
-                    <div className="p-4 border-t border-[#2d2d3e]">
+                    <div className="p-4 border-t border-[#2d2d3e] dark:border-[#1E40AF]">
                       <button
                         onClick={() => navigate("timeline")}
                         className="w-full bg-primary text-white text-sm font-semibold py-2.5 rounded-xl hover:bg-blue-600 transition-colors"
@@ -2337,7 +2339,7 @@ function SettingsScreen({ navigate }: { navigate: (s: Screen) => void }) {
             <div className="max-w-xl space-y-6">
               <div>
                 <h2 className="text-xl font-bold text-foreground mb-1">AI Models</h2>
-                <p className="text-sm text-muted-foreground">Model providers used for retrieval or generation.</p>
+                <p className="text-sm text-muted-foreground">AI fix is planned and marked Coming soon. No model is used today.</p>
               </div>
               <Card className="p-5">
                 <SettingsRow label="Model provider" value="None configured" />
@@ -2630,20 +2632,6 @@ function ArchitectureScreen({ navigate }: { navigate: (s: Screen) => void }) {
             );
           })}
         </div>
-
-        {/* Tech stack */}
-        <div className="max-w-2xl mx-auto mt-8">
-          <Card className="p-6">
-            <h3 className="text-sm font-semibold text-foreground mb-4">Technology Stack</h3>
-            <div className="flex flex-wrap gap-2">
-              {["Python 3.12", "FastAPI", "SQLite", "IndexedDB", "sentence-transformers", "Manifest V3", "VS Code Extension API", "TypeScript", "React"].map((tech) => (
-                <span key={tech} className="bg-background border border-border text-foreground text-xs font-medium px-3 py-1.5 rounded-lg font-mono">
-                  {tech}
-                </span>
-              ))}
-            </div>
-          </Card>
-        </div>
       </div>
     </DashboardLayout>
   );
@@ -2730,6 +2718,17 @@ function ThemedToaster() {
       richColors
       closeButton
       theme={dark ? "dark" : "light"}
+      toastOptions={
+        dark
+          ? {
+              style: {
+                background: "#000000",
+                color: "#ffffff",
+                border: "1px solid #1e3a8a",
+              },
+            }
+          : undefined
+      }
     />
   );
 }

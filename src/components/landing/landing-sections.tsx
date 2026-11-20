@@ -1,4 +1,11 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "../ui/dialog";
 import {
   Activity,
   Clock,
@@ -20,14 +27,63 @@ import type { LucideIcon } from "lucide-react";
 function SectionCard({
   children,
   className = "",
+  onClick,
 }: {
   children: ReactNode;
   className?: string;
+  onClick: () => void;
 }) {
   return (
-    <div className={`bg-card border border-border rounded-2xl ${className}`}>
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onClick();
+        }
+      }}
+      className={`bg-card border border-border rounded-2xl cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-500 ${className}`}
+    >
       {children}
     </div>
+  );
+}
+
+interface CardDetail {
+  title: string;
+  intro: string;
+  lines: string[];
+  comingSoon?: boolean;
+}
+
+function CardDetailDialog({
+  detail,
+  onClose,
+}: {
+  detail: CardDetail | null;
+  onClose: () => void;
+}) {
+  return (
+    <Dialog open={detail !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
+      {detail && (
+        <DialogContent className="max-h-[calc(100vh-2rem)] overflow-y-auto border-border shadow-lg focus:outline-none [&>button]:focus:ring-neutral-400">
+          <DialogHeader className="pr-8 text-left">
+            <div className="flex flex-wrap items-center gap-2">
+              <DialogTitle>{detail.title}</DialogTitle>
+              {detail.comingSoon && <ComingSoonBadge />}
+            </div>
+            <DialogDescription>{detail.intro}</DialogDescription>
+          </DialogHeader>
+          <ul className="list-disc space-y-2 pl-5 text-sm leading-relaxed text-muted-foreground">
+            {detail.lines.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </DialogContent>
+      )}
+    </Dialog>
   );
 }
 
@@ -42,6 +98,8 @@ function ComingSoonBadge() {
 interface Feature {
   title: string;
   description: string;
+  intro: string;
+  details: string[];
   icon: LucideIcon;
   color: string;
   comingSoon?: boolean;
@@ -52,6 +110,13 @@ const FEATURES: Feature[] = [
     title: "Silent capture",
     description:
       "The Chrome and VS Code extensions log the pages you visit, time spent on each, the files you open, editor diagnostics and failed terminal commands — quietly in the background.",
+    intro: "Both extensions capture context in the background.",
+    details: [
+      "Chrome records the URL, page title, time spent and visit count on allowed domains.",
+      "VS Code records file names, languages, editor diagnostics and failed terminal commands.",
+      "Events are buffered locally and synced to your FlowSync backend with an API key.",
+      "Capture can be paused in Settings.",
+    ],
     icon: Globe,
     color: "text-blue-600 bg-blue-50",
   },
@@ -59,6 +124,13 @@ const FEATURES: Feature[] = [
     title: "Live activity feed",
     description:
       "Watch events arrive in real time in Live Capture and step back through any day with the calendar picker.",
+    intro: "Live Capture shows events as they arrive.",
+    details: [
+      "The feed connects to the backend over a WebSocket.",
+      "Chrome and VS Code events appear in one timestamped list.",
+      "Source badges distinguish Chrome from VS Code.",
+      "The date picker lets you step back through previous days.",
+    ],
     icon: Activity,
     color: "text-emerald-600 bg-emerald-50",
   },
@@ -66,6 +138,13 @@ const FEATURES: Feature[] = [
     title: "Recovered sessions",
     description:
       "Past work rebuilt from your own activity, grouped by project and day, with a 30-minute inactivity gap splitting separate sessions.",
+    intro: "Recovered Sessions rebuild past work from stored events.",
+    details: [
+      "Events are grouped by project and local day.",
+      "A gap of more than 30 minutes starts a new session.",
+      "Open a session to see its captured events in order.",
+      "Export is available from the Recovered Sessions screen.",
+    ],
     icon: RefreshCw,
     color: "text-violet-600 bg-violet-50",
   },
@@ -73,6 +152,13 @@ const FEATURES: Feature[] = [
     title: "Error memory",
     description:
       "Recognise when you have seen an error before by matching it against your own captured history.",
+    intro: "Matching an error against your own history is planned, not built yet.",
+    details: [
+      "This card is marked Coming soon.",
+      "No matching engine or semantic index is implemented today.",
+      "Current history is reconstructed from stored events by project, day and time.",
+      "Nothing is diagnosed automatically by an AI model.",
+    ],
     icon: Search,
     color: "text-amber-600 bg-amber-50",
     comingSoon: true,
@@ -80,7 +166,15 @@ const FEATURES: Feature[] = [
   {
     title: "AI fix suggestions",
     description:
-      "Explain an error from your recent context and propose a fix as a diff you review and approve. Nothing is applied or run automatically, and it is off by default.",
+      "Coming soon: FlowSync will spot an error and ask if you want help. Say yes and it will work out a fix from your own history. You will review every change before it is applied.",
+    intro: "The AI fix flow is planned and marked Coming soon.",
+    details: [
+      "FlowSync will notice an error and ask whether you want help.",
+      "Only after you say yes will it work from your own history, including docs you were reading.",
+      "Nothing will be sent before you approve.",
+      "You will review the proposed changes before anything is applied or run.",
+      "Your own captured history is the input.",
+    ],
     icon: Sparkles,
     color: "text-blue-600 bg-blue-50",
     comingSoon: true,
@@ -89,6 +183,13 @@ const FEATURES: Feature[] = [
     title: "Welcome-back briefing",
     description:
       "After time away, a short summary of where you left off, what was failing and where to start.",
+    intro: "A short summary after time away is planned.",
+    details: [
+      "This card is marked Coming soon.",
+      "No briefing generator is implemented today.",
+      "Current history is available as Recovered Sessions grouped by project and day.",
+      "No AI model is configured or called.",
+    ],
     icon: Timer,
     color: "text-violet-600 bg-violet-50",
     comingSoon: true,
@@ -97,12 +198,21 @@ const FEATURES: Feature[] = [
     title: "Privacy controls",
     description:
       "Pause or resume capture, manage allowed browser domains, redact secrets from terminal output, and keep a retention window on stored events.",
+    intro: "Capture and storage controls are available in Settings.",
+    details: [
+      "Pause or resume capture.",
+      "Manage the Chrome domain allowlist.",
+      "Secret redaction is on by default.",
+      "Retention is set by the backend's RETENTION_DAYS value.",
+    ],
     icon: Shield,
     color: "text-emerald-600 bg-emerald-50",
   },
 ];
 
 export function FeatureSection() {
+  const [detail, setDetail] = useState<CardDetail | null>(null);
+
   return (
     <section
       id="features"
@@ -124,6 +234,12 @@ export function FeatureSection() {
             <SectionCard
               key={feature.title}
               className="p-6 hover:shadow-md transition-shadow"
+              onClick={() => setDetail({
+                title: feature.title,
+                intro: feature.intro,
+                lines: feature.details,
+                comingSoon: feature.comingSoon,
+              })}
             >
               <div
                 className={`w-11 h-11 rounded-xl flex items-center justify-center mb-5 ${feature.color}`}
@@ -143,6 +259,7 @@ export function FeatureSection() {
           );
         })}
       </div>
+      <CardDetailDialog detail={detail} onClose={() => setDetail(null)} />
     </section>
   );
 }
@@ -153,6 +270,13 @@ const HOW_IT_WORKS_STEPS: (Feature & { step: string; badge?: string })[] = [
     title: "Capture",
     description:
       "Browser + IDE activity logged per session. Tabs, URLs, errors, terminal commands — everything recorded silently in the background.",
+    intro: "Two extensions feed one event store.",
+    details: [
+      "Chrome records allowed-page URLs, titles and dwell time.",
+      "VS Code records files, diagnostics and failed terminal commands.",
+      "Each event is timestamped and tagged with its source.",
+      "Capture can be paused in Settings.",
+    ],
     icon: Activity,
     color: "text-blue-600 bg-blue-50",
   },
@@ -161,6 +285,13 @@ const HOW_IT_WORKS_STEPS: (Feature & { step: string; badge?: string })[] = [
     title: "Link",
     description:
       "Correlated by timestamp and project context. FlowSync understands that the Stack Overflow tab and the VS Code error belong to the same session.",
+    intro: "Events are correlated by stored metadata.",
+    details: [
+      "Each event has a timestamp, project and source.",
+      "Recovered Sessions groups events by project and local day.",
+      "A 30-minute inactivity gap separates sessions.",
+      "No semantic matching engine is running today.",
+    ],
     icon: GitBranch,
     color: "text-violet-600 bg-violet-50",
   },
@@ -169,6 +300,13 @@ const HOW_IT_WORKS_STEPS: (Feature & { step: string; badge?: string })[] = [
     title: "Retrieve",
     description:
       "Relevant past context surfaced automatically when a similar error recurs. Not generated — reconstructed from your own history.",
+    intro: "Past activity is reconstructed from stored events.",
+    details: [
+      "Open Recovered Sessions to browse grouped past work.",
+      "Live Capture also supports stepping back through a previous day.",
+      "Content comes from captured URLs, files and errors, not generated text.",
+      "Similar-error matching is not implemented today.",
+    ],
     icon: RefreshCw,
     color: "text-emerald-600 bg-emerald-50",
   },
@@ -176,7 +314,15 @@ const HOW_IT_WORKS_STEPS: (Feature & { step: string; badge?: string })[] = [
     step: "04",
     title: "Fix",
     description:
-      "When an error hits, FlowSync's AI uses your own history, including the docs you were reading, to explain it and propose a fix. You review the diff and approve. Nothing is applied or run without you.",
+      "Coming soon: FlowSync will notice an error and ask if you want help. Say yes and it will work from your own history. You will review every change before it is applied.",
+    intro: "The AI fix flow is planned and marked Coming soon.",
+    details: [
+      "FlowSync will notice an error and ask whether you want help.",
+      "Only after you say yes will it work from your own history, including docs you were reading.",
+      "Nothing will be sent before you approve.",
+      "You will review the proposed changes before anything is applied or run.",
+      "Your own captured history is the input.",
+    ],
     icon: Sparkles,
     color: "text-amber-600 bg-amber-50",
     badge: "Coming soon",
@@ -184,6 +330,8 @@ const HOW_IT_WORKS_STEPS: (Feature & { step: string; badge?: string })[] = [
 ];
 
 export function HowItWorksSection() {
+  const [detail, setDetail] = useState<CardDetail | null>(null);
+
   return (
     <section
       id="how-it-works"
@@ -205,6 +353,12 @@ export function HowItWorksSection() {
             <SectionCard
               key={item.step}
               className="p-7 hover:shadow-md transition-shadow"
+              onClick={() => setDetail({
+                title: `${item.step} · ${item.title}`,
+                intro: item.intro,
+                lines: item.details,
+                comingSoon: Boolean(item.badge),
+              })}
             >
               <div
                 className={`w-11 h-11 rounded-xl flex items-center justify-center mb-5 ${item.color}`}
@@ -227,6 +381,7 @@ export function HowItWorksSection() {
           );
         })}
       </div>
+      <CardDetailDialog detail={detail} onClose={() => setDetail(null)} />
     </section>
   );
 }
@@ -236,6 +391,8 @@ interface PrivacyCard {
   icon: LucideIcon;
   color: string;
   comingSoon?: boolean;
+  intro: string;
+  details: string[];
   body: ReactNode;
 }
 
@@ -244,6 +401,13 @@ const PRIVACY_CARDS: PrivacyCard[] = [
     title: "What is captured",
     icon: Globe,
     color: "text-blue-600 bg-blue-50",
+    intro: "The extensions store event metadata, not page or file contents.",
+    details: [
+      "Chrome records allowed-page URLs, titles and time spent.",
+      "VS Code records file names, languages and error diagnostics.",
+      "Failed terminal commands and their output are recorded.",
+      "Stuck-session duration is recorded when errors stay unresolved.",
+    ],
     body: (
       <p>
         Chrome records the URL, page title and time spent on each allowed page.
@@ -257,6 +421,13 @@ const PRIVACY_CARDS: PrivacyCard[] = [
     title: "What is never captured",
     icon: EyeOff,
     color: "text-red-600 bg-red-100",
+    intro: "Content and credentials are excluded from capture.",
+    details: [
+      "Page content and form inputs are not read or stored.",
+      "Keystrokes and passwords are not captured.",
+      "File contents are not read or stored.",
+      "Link query parameters and fragments are removed in the app.",
+    ],
     body: (
       <>
         <p>
@@ -274,6 +445,13 @@ const PRIVACY_CARDS: PrivacyCard[] = [
     title: "Browser domain allowlist",
     icon: Shield,
     color: "text-emerald-600 bg-emerald-50",
+    intro: "Chrome capture is limited to domains you allow.",
+    details: [
+      "Chrome only records pages on allowed developer domains.",
+      "A default list of common developer sites ships with the app.",
+      "You can add or remove domains in Settings.",
+      "Events are only posted for allowed pages.",
+    ],
     body: (
       <p>
         Chrome only records pages on your allowed developer domains. The list
@@ -286,6 +464,13 @@ const PRIVACY_CARDS: PrivacyCard[] = [
     title: "Secret redaction",
     icon: Lock,
     color: "text-violet-600 bg-violet-50",
+    intro: "Sensitive strings are stripped before events are stored.",
+    details: [
+      "Bearer tokens and common API keys are stripped from terminal output.",
+      "Password values and long secret-like strings are removed.",
+      "Redaction is on by default.",
+      "The setting is available under VS Code options.",
+    ],
     body: (
       <p>
         The VS Code extension strips bearer tokens, common API keys, password
@@ -298,6 +483,13 @@ const PRIVACY_CARDS: PrivacyCard[] = [
     title: "Local storage and retention",
     icon: Database,
     color: "text-gray-600 bg-gray-100",
+    intro: "Events live in the backend database you run yourself.",
+    details: [
+      "Events are stored in the FlowSync backend database you run yourself.",
+      "Cloud sync is off and marked Coming soon.",
+      "The backend deletes raw events older than the retention window.",
+      "The default retention window is 30 days.",
+    ],
     body: (
       <p>
         Events are stored in the FlowSync backend database you run yourself.
@@ -311,6 +503,13 @@ const PRIVACY_CARDS: PrivacyCard[] = [
     title: "Access control",
     icon: Server,
     color: "text-amber-600 bg-amber-50",
+    intro: "Write and data-control endpoints require an API key.",
+    details: [
+      "Writing events requires the API key.",
+      "Reading settings requires the API key.",
+      "Export and delete-all require the API key.",
+      "Cross-origin requests are limited to configured origins.",
+    ],
     body: (
       <p>
         Writing events and reading settings, export and delete all require an
@@ -323,14 +522,21 @@ const PRIVACY_CARDS: PrivacyCard[] = [
     icon: Sparkles,
     color: "text-blue-600 bg-blue-50",
     comingSoon: true,
+    intro: "The AI fix flow is planned; no AI model is called today.",
+    details: [
+      "No AI model is called today and no provider is configured.",
+      "FlowSync will notice an error and ask whether you want help.",
+      "Only after you say yes will it use your own history, including docs you were reading.",
+      "Nothing will be sent before you approve.",
+      "You will review proposed changes before anything is applied or run.",
+    ],
     body: (
       <p>
-        AI is off by default. When it ships and you enable it, an error's text,
-        the trimmed code around it and recent activity titles would be sent to
-        the AI provider only when you click a button for that request. Fixes are
-        shown as a diff and never applied or run automatically. Secrets,{" "}
-        <span className="font-mono text-xs">.env</span> files and ignored files
-        are never sent.
+        Coming soon: no AI model is called today. FlowSync will notice an error
+        and ask whether you want help. Only after you say yes will it use your
+        own history, including docs you were reading. Nothing will be sent before
+        you approve, and you will review proposed changes before anything is
+        applied or run.
       </p>
     ),
   },
@@ -338,6 +544,13 @@ const PRIVACY_CARDS: PrivacyCard[] = [
     title: "Your control",
     icon: Settings,
     color: "text-emerald-600 bg-emerald-50",
+    intro: "Capture and stored data are controlled from Settings.",
+    details: [
+      "Pause or resume capture in Settings.",
+      "Adjust capture toggles and allowed domains.",
+      "Export every event as JSON.",
+      "Permanently delete all events from Settings → Cloud Sync.",
+    ],
     body: (
       <p>
         Pause or resume capture and adjust capture toggles in Settings. Export
@@ -352,6 +565,8 @@ const PRIVACY_CARDS: PrivacyCard[] = [
 ];
 
 export function PrivacySection() {
+  const [detail, setDetail] = useState<CardDetail | null>(null);
+
   return (
     <section
       id="privacy"
@@ -368,7 +583,16 @@ export function PrivacySection() {
         {PRIVACY_CARDS.map((card) => {
           const Icon = card.icon;
           return (
-            <SectionCard key={card.title} className="p-6">
+            <SectionCard
+              key={card.title}
+              className="p-6"
+              onClick={() => setDetail({
+                title: card.title,
+                intro: card.intro,
+                lines: card.details,
+                comingSoon: card.comingSoon,
+              })}
+            >
               <div
                 className={`w-10 h-10 rounded-xl flex items-center justify-center mb-4 ${card.color}`}
               >
@@ -386,9 +610,11 @@ export function PrivacySection() {
         })}
       </div>
 
+      <CardDetailDialog detail={detail} onClose={() => setDetail(null)} />
+
       <div className="mt-6 max-w-3xl mx-auto border border-border rounded-2xl p-6 sm:p-8 text-center">
         <p className="text-foreground font-medium">
-          FlowSync reconstructs work you already did — your own past activity,
+          FlowSync reconstructs work you already did - your own past activity,
           surfaced when you need it.
         </p>
       </div>
